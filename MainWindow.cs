@@ -385,4 +385,5 @@ public sealed class MainWindow : Window
             AppWindow.Move(new Windows.Graphics.PointInt32(centeredX, centeredY));
         }
     }
+
 }

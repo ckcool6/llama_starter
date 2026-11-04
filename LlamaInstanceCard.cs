@@ -86,7 +86,22 @@ public class LlamaInstanceCard : UserControl
         _ctxBox = new TextBox { Text = "4096", Width = 80 };
         _nglBox = new TextBox { Text = "99", Width = 80 };
         _mmprojBox = new TextBox { PlaceholderText = "Multimodal projector (.gguf, optional)", Width = 360 };
-        _extraBox = new TextBox { PlaceholderText = "Extra args (e.g. --host 0.0.0.0)", Width = 360 };
+
+        _extraBox = new TextBox 
+        { 
+            PlaceholderText = "Click to configure extra args (e.g. --host 0.0.0.0)", 
+            Width = 360,
+            IsReadOnly = true 
+        };
+        _extraBox.Tapped += async (s, e) => await ShowExtraArgsDialogAsync();
+
+        var editExtraBtn = new Button
+        {
+            Content = new SymbolIcon(Symbol.Edit),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        ToolTipService.SetToolTip(editExtraBtn, "Edit Extra Arguments in dialog");
+        editExtraBtn.Click += async (s, e) => await ShowExtraArgsDialogAsync();
 
         // 为 -m 配置浏览按钮
         var browseModelBtn = new Button
@@ -193,7 +208,9 @@ public class LlamaInstanceCard : UserControl
                         Children =
                         {
                             new TextBlock { Text = "Extra Args:", Width = 85, VerticalAlignment = VerticalAlignment.Center },
-                            _extraBox
+                            _extraBox,
+                            editExtraBtn 
+
                         }
                     }
                 }
@@ -319,5 +336,53 @@ public class LlamaInstanceCard : UserControl
         _startStopIcon.Symbol = Symbol.Play;
         _startStopText.Text = "Start";
         _startStopBtn.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
+    }
+
+    private async Task ShowExtraArgsDialogAsync()
+    {
+        // 如果已有参数，按空格或换行拆开，方便多行展示编辑
+        string initialText = _extraBox.Text.Replace(" --", "\n--");
+
+        var editBox = new TextBox
+        {
+            Text = initialText,
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            Height = 200,
+            Width = 460,
+            PlaceholderText = "Enter parameters here (one per line or space-separated):\n\n--host 0.0.0.0\n--threads 8\n--n-predict 512\n--temp 0.7",
+            FontFamily = new FontFamily("Consolas, Cascadia Code, Segoe UI")
+        };
+
+        var dialog = new ContentDialog
+        {
+            Title = $"Extra Arguments - Instance #{_id}",
+            Content = new StackPanel
+            {
+                Spacing = 8,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "Enter custom CLI arguments. Line breaks will be automatically converted to spaces:",
+                        Foreground = new SolidColorBrush(Colors.Gray),
+                        FontSize = 12
+                    },
+                    editBox
+                }
+            },
+            PrimaryButtonText = "Save",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = this.XamlRoot
+        };
+
+        var result = await dialog.ShowAsync();
+        if (result == ContentDialogResult.Primary)
+        {
+            char[] separators = new char[] { '\r', '\n' };
+            string[] lines = editBox.Text.Split(separators, StringSplitOptions.RemoveEmptyEntries);
+            _extraBox.Text = string.Join(" ", Array.ConvertAll(lines, l => l.Trim()));
+        }
     }
 }
