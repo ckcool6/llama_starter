@@ -27,6 +27,20 @@ public sealed class MainWindow : Window
     private readonly StringBuilder _allLogsBuffer = new();
     private LlamaInstanceCard? _selectedLogCard = null;
     private int _cardCounter = 1;
+    private ScrollViewer? _logInternalScrollViewer;
+
+    private static ScrollViewer? FindScrollViewer(DependencyObject root)
+    {
+        if (root is ScrollViewer sv) return sv;
+        int count = VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            var result = FindScrollViewer(child);
+            if (result != null) return result;
+        }
+        return null;
+    }
 
     public MainWindow()
     {
@@ -89,16 +103,20 @@ public sealed class MainWindow : Window
             VerticalAlignment = VerticalAlignment.Center
         };
 
-        _logConsole = new TextBox
+        // 直接在 TextBox 上开启垂直滚动条，并固定高度
+       _logConsole = new TextBox
         {
             IsReadOnly = true,
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             FontFamily = new FontFamily("Consolas, Cascadia Code, Segoe UI"),
             FontSize = 12,
+            Height = 160,
             BorderThickness = new Thickness(0),
             Background = new SolidColorBrush(Colors.Transparent)
         };
+
+        ScrollViewer.SetVerticalScrollBarVisibility(_logConsole, ScrollBarVisibility.Auto);
 
         _logScrollViewer = new ScrollViewer
         {
@@ -168,13 +186,13 @@ public sealed class MainWindow : Window
                             }
                         }
                     },
-                    _logScrollViewer
+                    _logConsole 
                 }
             }
         };
         Grid.SetColumn((FrameworkElement)((Grid)logPanel.Child).Children[0], 0);
         Grid.SetColumn(((FrameworkElement)((Grid)((Grid)logPanel.Child).Children[0]).Children[1]), 1);
-        Grid.SetRow(_logScrollViewer, 1);
+        Grid.SetRow(_logConsole, 1); 
 
         // 4. 根布局
         var rootGrid = new Grid();
@@ -335,8 +353,13 @@ public sealed class MainWindow : Window
 
     private void ScrollLogToEnd()
     {
-        _logConsole.Select(_logConsole.Text.Length, 0);
-        _logScrollViewer.ChangeView(null, _logScrollViewer.ScrollableHeight, null);
+        _logInternalScrollViewer ??= FindScrollViewer(_logConsole);
+
+        if (_logInternalScrollViewer != null)
+        {
+            _logConsole.UpdateLayout();
+            _logInternalScrollViewer.ChangeView(null, _logInternalScrollViewer.ScrollableHeight, null, disableAnimation: true);
+        }
     }
 
     private void SetupWindowStyle()
