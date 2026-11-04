@@ -16,9 +16,10 @@ public class LlamaInstanceCard : UserControl
 
     private Process? _process;
     private readonly Button _startStopBtn;
+    private readonly SymbolIcon _startStopIcon;
+    private readonly TextBlock _startStopText;
     private readonly TextBlock _statusBadge;
 
-    // Parameter input fields
     private readonly TextBox _modelBox;
     private readonly TextBox _portBox;
     private readonly TextBox _ctxBox;
@@ -35,7 +36,6 @@ public class LlamaInstanceCard : UserControl
         _getExePathFunc = getExePathFunc;
         _logCallback = logCallback;
 
-        // Status badge and control buttons
         _statusBadge = new TextBlock
         {
             Text = "Stopped",
@@ -44,21 +44,30 @@ public class LlamaInstanceCard : UserControl
             FontSize = 12
         };
 
+        // 单色启停图标与按钮
+        _startStopIcon = new SymbolIcon(Symbol.Play);
+        _startStopText = new TextBlock { Text = "Start", VerticalAlignment = VerticalAlignment.Center };
+        
         _startStopBtn = new Button
         {
-            Content = "▶ Start",
-            Style = (Style)Application.Current.Resources["AccentButtonStyle"]
+            Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+            Content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 6,
+                Children = { _startStopIcon, _startStopText }
+            }
         };
         _startStopBtn.Click += (s, e) => ToggleStartStop();
 
-        var deleteBtn = new Button { Content = "🗑️ Delete" };
+        // 单色删除按钮
+        var deleteBtn = MainWindow.CreateIconButton(Symbol.Delete, "Delete");
         deleteBtn.Click += (s, e) =>
         {
             Stop();
             DeleteRequested?.Invoke(this);
         };
 
-        // Default input field initialization
         _modelBox = new TextBox { PlaceholderText = "Model path (.gguf)", Width = 360 };
         _portBox = new TextBox { Text = (8080 + id - 1).ToString(), Width = 80 };
         _ctxBox = new TextBox { Text = "4096", Width = 80 };
@@ -78,7 +87,6 @@ public class LlamaInstanceCard : UserControl
                 Spacing = 12,
                 Children =
                 {
-                    // Header: Instance title, status, action buttons
                     new Grid
                     {
                         ColumnDefinitions =
@@ -106,7 +114,6 @@ public class LlamaInstanceCard : UserControl
                             }
                         }
                     },
-                    // Row 1: Model path
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -117,7 +124,6 @@ public class LlamaInstanceCard : UserControl
                             _modelBox
                         }
                     },
-                    // Row 2: Common config (Port / Context / NGL)
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -132,7 +138,6 @@ public class LlamaInstanceCard : UserControl
                             _nglBox
                         }
                     },
-                    // Row 3: mmproj (Vision projector)
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -143,7 +148,6 @@ public class LlamaInstanceCard : UserControl
                             _mmprojBox
                         }
                     },
-                    // Row 4: Extra custom arguments
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -168,11 +172,10 @@ public class LlamaInstanceCard : UserControl
         string exePath = _getExePathFunc();
         if (string.IsNullOrWhiteSpace(exePath) || !File.Exists(exePath))
         {
-            _logCallback($"[Instance #{_id}] ❌ Start failed: Executable path is invalid or file does not exist!");
+            _logCallback($"[Instance #{_id}] [ERROR] Executable path is invalid or file does not exist!");
             return;
         }
 
-        // Construct launch arguments
         string args = $"--port {_portBox.Text} -c {_ctxBox.Text} -ngl {_nglBox.Text}";
         if (!string.IsNullOrWhiteSpace(_modelBox.Text)) args += $" -m \"{_modelBox.Text.Trim()}\"";
         if (!string.IsNullOrWhiteSpace(_mmprojBox.Text)) args += $" --mmproj \"{_mmprojBox.Text.Trim()}\"";
@@ -201,13 +204,17 @@ public class LlamaInstanceCard : UserControl
 
             _statusBadge.Text = $"Running (PID: {_process.Id})";
             _statusBadge.Foreground = new SolidColorBrush(Colors.SeaGreen);
-            _startStopBtn.Content = "⏹ Stop";
-            _startStopBtn.Style = null; // Revert to standard style
-            _logCallback($"[Instance #{_id}] 🚀 Started successfully! Args: {args}");
+
+            // 切换为 Stop 状态（单色图标 + 普通按钮样式）
+            _startStopIcon.Symbol = Symbol.Stop;
+            _startStopText.Text = "Stop";
+            _startStopBtn.ClearValue(Button.StyleProperty);
+
+            _logCallback($"[Instance #{_id}] [STARTED] Args: {args}");
         }
         catch (Exception ex)
         {
-            _logCallback($"[Instance #{_id}] ❌ Start error: {ex.Message}");
+            _logCallback($"[Instance #{_id}] [ERROR] {ex.Message}");
             UpdateStoppedUi();
         }
     }
@@ -217,14 +224,14 @@ public class LlamaInstanceCard : UserControl
         if (!IsRunning) return;
         try
         {
-            _process?.Kill(entireProcessTree: true); // Force-kill entire process tree to prevent VRAM leak
+            _process?.Kill(entireProcessTree: true);
             _process?.Dispose();
             _process = null;
-            _logCallback($"[Instance #{_id}] ⏹ Terminated.");
+            _logCallback($"[Instance #{_id}] [STOPPED] Process terminated.");
         }
         catch (Exception ex)
         {
-            _logCallback($"[Instance #{_id}] Stop error: {ex.Message}");
+            _logCallback($"[Instance #{_id}] [ERROR] Stop failed: {ex.Message}");
         }
         finally
         {
@@ -242,7 +249,10 @@ public class LlamaInstanceCard : UserControl
     {
         _statusBadge.Text = "Stopped";
         _statusBadge.Foreground = new SolidColorBrush(Colors.Gray);
-        _startStopBtn.Content = "▶ Start";
+
+        // 恢复为 Start 状态（单色播放图标 + Accent 强调色）
+        _startStopIcon.Symbol = Symbol.Play;
+        _startStopText.Text = "Start";
         _startStopBtn.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
     }
 }

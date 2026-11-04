@@ -27,32 +27,26 @@ public sealed class MainWindow : Window
         Title = "llama-server Multi-Instance Manager (Fluent WinUI 3)";
         SetupWindowStyle();
 
-        // 1. 顶部栏 (Exe 路径 + 浏览/查看 + 全局控制按钮)
+        // 1. 顶部栏 (Exe 路径 + 统一单色矢量图标按钮)
         _exePathBox = new TextBox
         {
             PlaceholderText = @"C:\llama.cpp\build\bin\llama-server.exe",
-            Width = 280
+            Width = 360
         };
 
-        // 📂 浏览选择文件按钮
-        var browseBtn = new Button { Content = "📁 Browse..." };
+        var browseBtn = CreateIconButton(Symbol.OpenFile, "Browse...");
         browseBtn.Click += async (s, e) => await BrowseExeFileAsync();
 
-        // 🔍 在资源管理器中打开查看按钮
-        var openFolderBtn = new Button { Content = "🔍 Open" };
+        var openFolderBtn = CreateIconButton(Symbol.Folder, "Open");
         openFolderBtn.Click += (s, e) => OpenInExplorer();
 
-        var addBtn = new Button { Content = "➕ Add Instance" };
+        var addBtn = CreateIconButton(Symbol.Add, "Add Instance");
         addBtn.Click += (s, e) => AddCard();
 
-        var startAllBtn = new Button
-        {
-            Content = "▶ Start All",
-            Style = (Style)Application.Current.Resources["AccentButtonStyle"]
-        };
+        var startAllBtn = CreateIconButton(Symbol.Play, "Start All", (Style)Application.Current.Resources["AccentButtonStyle"]);
         startAllBtn.Click += (s, e) => { foreach (var card in _cardList) card.Start(); };
 
-        var stopAllBtn = new Button { Content = "⏹ Stop All" };
+        var stopAllBtn = CreateIconButton(Symbol.Stop, "Stop All");
         stopAllBtn.Click += (s, e) => { foreach (var card in _cardList) card.Stop(); };
 
         var topBar = new StackPanel
@@ -98,7 +92,8 @@ public sealed class MainWindow : Window
             Height = 160
         };
 
-        var clearLogBtn = new Button { Content = "Clear Logs", FontSize = 12 };
+        var clearLogBtn = CreateIconButton(Symbol.Clear, "Clear Logs");
+        clearLogBtn.FontSize = 12;
         clearLogBtn.Click += (s, e) => _logConsole.Text = string.Empty;
 
         var logPanel = new Border
@@ -138,7 +133,7 @@ public sealed class MainWindow : Window
         Grid.SetColumn(clearLogBtn, 1);
         Grid.SetRow(_logScrollViewer, 1);
 
-        // 4. 根布局 (三行：TopBar / Cards / LogPanel)
+        // 4. 根布局
         var rootGrid = new Grid();
         rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         rootGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -154,22 +149,40 @@ public sealed class MainWindow : Window
 
         Content = rootGrid;
 
-        // 窗口关闭时自动清理所有子进程
         Closed += (s, e) => { foreach (var card in _cardList) card.Stop(); };
 
-        // 默认先加一个实例卡片
         AddCard();
     }
 
     /// <summary>
-    /// 打开 Windows 文件选择弹窗
+    /// 辅助方法：生成标准 WinUI 3 单色线性图标按钮
     /// </summary>
+    public static Button CreateIconButton(Symbol symbol, string text, Style? style = null)
+    {   
+        var btn = new Button(); // 👈 默认保留系统原生的圆角样式
+        if (style != null)
+        {
+            btn.Style = style;  // 只有真正传了 AccentButtonStyle 等样式时才覆盖
+        }
+
+        btn.Content = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            Children =
+            {
+                new SymbolIcon(symbol),
+                new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center }
+            }
+        };
+        return btn;
+    }
+
     private async System.Threading.Tasks.Task BrowseExeFileAsync()
     {
         var picker = new FileOpenPicker();
         picker.FileTypeFilter.Add(".exe");
 
-        // WinUI 3 Desktop 需要将当前窗口的句柄挂载到选择器上
         var hwnd = WindowNative.GetWindowHandle(this);
         InitializeWithWindow.Initialize(picker, hwnd);
 
@@ -181,9 +194,6 @@ public sealed class MainWindow : Window
         }
     }
 
-    /// <summary>
-    /// 在 Windows 资源管理器中打开并高亮选中该文件
-    /// </summary>
     private void OpenInExplorer()
     {
         string path = _exePathBox.Text.Trim();
@@ -197,7 +207,7 @@ public sealed class MainWindow : Window
         }
         else
         {
-            AppendLog("⚠️ Path does not exist, cannot open in Explorer.");
+            AppendLog("[WARN] Path does not exist, cannot open in Explorer.");
         }
     }
 
@@ -229,21 +239,21 @@ public sealed class MainWindow : Window
 
     private void SetupWindowStyle()
     {
-    SystemBackdrop = new MicaBackdrop();
-    ExtendsContentIntoTitleBar = true;
+        SystemBackdrop = new MicaBackdrop();
+        ExtendsContentIntoTitleBar = true;
 
-    var titleBar = AppWindow.TitleBar;
-    titleBar.ButtonBackgroundColor = Colors.Transparent;
-    titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
-    titleBar.ButtonForegroundColor = Colors.Black;
-    titleBar.ButtonHoverForegroundColor = Colors.Black;
+        var titleBar = AppWindow.TitleBar;
+        titleBar.ButtonBackgroundColor = Colors.Transparent;
+        titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
+        titleBar.ButtonForegroundColor = Colors.Black;
+        titleBar.ButtonHoverForegroundColor = Colors.Black;
 
-    int newWidth = 1280;
-    int newHeight = 860;
-    AppWindow.Resize(new Windows.Graphics.SizeInt32(newWidth, newHeight));
+        int newWidth = 1350;
+        int newHeight = 920;
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(newWidth, newHeight));
 
-    var displayArea = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary);
-    if (displayArea != null)
+        var displayArea = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary);
+        if (displayArea != null)
         {
             var centeredX = (displayArea.WorkArea.Width - newWidth) / 2;
             var centeredY = (displayArea.WorkArea.Height - newHeight) / 2;
