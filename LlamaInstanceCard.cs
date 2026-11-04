@@ -433,4 +433,34 @@ public class LlamaInstanceCard : UserControl
             _extraBox.Text = string.Join(" ", Array.ConvertAll(lines, l => l.Trim()));
         }
     }
+
+    /// <summary>
+    /// 导出当前卡片的配置数据
+    /// </summary>
+    public InstanceConfig GetConfig()
+    {
+        return new InstanceConfig
+        {
+            Id = _id,
+            ModelPath = _modelBox.Text.Trim(),
+            Port = _portBox.Text.Trim(),
+            Ctx = _ctxBox.Text.Trim(),
+            Ngl = _nglBox.Text.Trim(),
+            MmprojPath = _mmprojBox.Text.Trim(),
+            ExtraArgs = _extraBox.Text.Trim()
+        };
+    }
+
+    /// <summary>
+    /// 将配置数据应用到当前卡片 UI
+    /// </summary>
+    public void ApplyConfig(InstanceConfig config)
+    {
+        _modelBox.Text = config.ModelPath ?? string.Empty;
+        _portBox.Text = string.IsNullOrWhiteSpace(config.Port) ? (8080 + _id - 1).ToString() : config.Port;
+        _ctxBox.Text = string.IsNullOrWhiteSpace(config.Ctx) ? "4096" : config.Ctx;
+        _nglBox.Text = string.IsNullOrWhiteSpace(config.Ngl) ? "99" : config.Ngl;
+        _mmprojBox.Text = config.MmprojPath ?? string.Empty;
+        _extraBox.Text = config.ExtraArgs ?? string.Empty;
+    }
 }

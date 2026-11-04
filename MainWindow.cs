@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
@@ -15,6 +17,11 @@ namespace MyMarkupApp;
 
 public sealed class MainWindow : Window
 {
+    private static readonly string ConfigFilePath = Path.Combine(
+    Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory,
+    "config.json"
+    );
+
     private readonly nint _hwnd;
     private readonly StackPanel _cardsContainer;
     private readonly ScrollViewer _cardsScrollViewer;
@@ -66,33 +73,31 @@ public sealed class MainWindow : Window
 
         var startAllBtn = CreateIconButton(Symbol.Play, "Start All", (Style)Application.Current.Resources["AccentButtonStyle"]);
         startAllBtn.Click += async (s, e) =>
+        {
+            startAllBtn.IsEnabled = false;
+            try
             {
-                startAllBtn.IsEnabled = false;
-                try
+                foreach (var card in _cardList)
                 {
-                    foreach (var card in _cardList)
+                    if (card.IsRunning) continue;
+
+                    AppendSystemLog($"Starting Instance #{card.Id}... Waiting for model to load into VRAM.");
+                    bool success = await card.StartAsync(TimeSpan.FromSeconds(180));
+
+                    if (!success)
                     {
-                        if (card.IsRunning) continue;
-
-                        AppendSystemLog($"Starting Instance #{card.Id}... Waiting for model to load into VRAM.");
-
-
-                        bool success = await card.StartAsync(TimeSpan.FromSeconds(180));
-
-                        if (!success)
-                        {
-                            AppendSystemLog($"[ERROR] Instance #{card.Id} failed to start. Sequential startup aborted.");
-                            break;
-                        }
-
-                        AppendSystemLog($"Instance #{card.Id} is READY. Proceeding to next instance...");
+                        AppendSystemLog($"[ERROR] Instance #{card.Id} failed to start. Sequential startup aborted.");
+                        break;
                     }
+
+                    AppendSystemLog($"Instance #{card.Id} is READY. Proceeding to next instance...");
                 }
-                finally
-                {
-                    startAllBtn.IsEnabled = true;
-                }
-            };
+            }
+            finally
+            {
+                startAllBtn.IsEnabled = true;
+            }
+        };
 
         var stopAllBtn = CreateIconButton(Symbol.Stop, "Stop All");
         stopAllBtn.Click += (s, e) => { foreach (var card in _cardList) card.Stop(); };
@@ -130,7 +135,6 @@ public sealed class MainWindow : Window
             VerticalAlignment = VerticalAlignment.Center
         };
 
-        // 直接在 TextBox 上开启垂直滚动条，并固定高度
         _logConsole = new TextBox
         {
             IsReadOnly = true,
@@ -151,7 +155,6 @@ public sealed class MainWindow : Window
             Height = 160
         };
 
-        // 切换回所有日志
         var showAllLogsBtn = CreateIconButton(Symbol.List, "All Logs");
         showAllLogsBtn.FontSize = 12;
         showAllLogsBtn.Click += (s, e) =>
@@ -162,7 +165,6 @@ public sealed class MainWindow : Window
             ScrollLogToEnd();
         };
 
-        // 清空当前视图日志
         var clearLogBtn = CreateIconButton(Symbol.Clear, "Clear Logs");
         clearLogBtn.FontSize = 12;
         clearLogBtn.Click += (s, e) =>
@@ -237,9 +239,15 @@ public sealed class MainWindow : Window
 
         Content = rootGrid;
 
-        Closed += (s, e) => { foreach (var card in _cardList) card.Stop(); };
+        // 退出时：保存配置到 json 并停止所有进程
+        Closed += (s, e) =>
+        {
+            SaveConfig();
+            foreach (var card in _cardList) card.Stop();
+        };
 
-        AddCard();
+        // 启动时读取本地配置
+        LoadConfig();
     }
 
     public static Button CreateIconButton(Symbol symbol, string text, Style? style = null)
@@ -295,11 +303,22 @@ public sealed class MainWindow : Window
         }
     }
 
-    private void AddCard()
+    // 支持传入已存在的配置
+    private void AddCard(InstanceConfig? config = null)
     {
-        var card = new LlamaInstanceCard(_cardCounter++, () => _exePathBox.Text, AppendCardLog, _hwnd);
+        int id = config?.Id ?? _cardCounter++;
+        if (id >= _cardCounter)
+        {
+            _cardCounter = id + 1;
+        }
 
-        // 点击 View Log 切换到只显示该卡片日志
+        var card = new LlamaInstanceCard(id, () => _exePathBox.Text, AppendCardLog, _hwnd);
+
+        if (config != null)
+        {
+            card.ApplyConfig(config);
+        }
+
         card.ViewLogRequested += c =>
         {
             _selectedLogCard = c;
@@ -308,10 +327,8 @@ public sealed class MainWindow : Window
             ScrollLogToEnd();
         };
 
-        // 删除卡片回调
         card.DeleteRequested += c =>
         {
-            // 如果删掉的是当前正在查看的卡片，切回全部日志视图
             if (_selectedLogCard == c)
             {
                 _selectedLogCard = null;
@@ -323,11 +340,13 @@ public sealed class MainWindow : Window
             _cardList.Remove(c);
             _cardsContainer.Children.Remove(c);
 
-            // 方案 A：所有卡片清空时重置计数器从 1 开始
             if (_cardList.Count == 0)
             {
                 _cardCounter = 1;
             }
+
+            // 删除卡片后自动保存一次
+            SaveConfig();
         };
 
         _cardList.Add(card);
@@ -336,6 +355,63 @@ public sealed class MainWindow : Window
         _cardsContainer.UpdateLayout();
         _cardsScrollViewer.ChangeView(null, _cardsScrollViewer.ScrollableHeight, null);
     }
+
+    #region 本地 JSON 持久化
+
+    private void SaveConfig()
+    {
+        try
+        {
+            var config = new AppConfig
+            {
+                ServerPath = _exePathBox.Text.Trim(),
+                Instances = _cardList.Select(c => c.GetConfig()).ToList()
+            };
+
+            var options = new JsonSerializerOptions { WriteIndented = true };
+            string json = JsonSerializer.Serialize(config, options);
+            File.WriteAllText(ConfigFilePath, json, Encoding.UTF8);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[Config] Failed to save: {ex.Message}");
+        }
+    }
+
+    private void LoadConfig()
+    {
+        try
+        {
+            if (File.Exists(ConfigFilePath))
+            {
+                string json = File.ReadAllText(ConfigFilePath, Encoding.UTF8);
+                var config = JsonSerializer.Deserialize<AppConfig>(json);
+
+                if (config != null)
+                {
+                    _exePathBox.Text = config.ServerPath ?? string.Empty;
+
+                    if (config.Instances != null && config.Instances.Count > 0)
+                    {
+                        foreach (var inst in config.Instances)
+                        {
+                            AddCard(inst);
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendSystemLog($"[WARN] Failed to load config.json: {ex.Message}");
+        }
+
+        // 如果没有配置文件或为空，默认添加一张空卡片
+        AddCard();
+    }
+
+    #endregion
 
     private void AppendSystemLog(string message)
     {
@@ -363,13 +439,11 @@ public sealed class MainWindow : Window
 
             _allLogsBuffer.Append(globalLine);
 
-            // 如果当前在看这个卡片，显示纯净的单实例日志
             if (_selectedLogCard == card)
             {
                 _logConsole.Text += instanceLine;
                 ScrollLogToEnd();
             }
-            // 如果当前是全局视图，显示带 [#{id}] 标识的日志
             else if (_selectedLogCard == null)
             {
                 _logConsole.Text += globalLine;
@@ -412,5 +486,4 @@ public sealed class MainWindow : Window
             AppWindow.Move(new Windows.Graphics.PointInt32(centeredX, centeredY));
         }
     }
-
 }
