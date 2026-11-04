@@ -392,9 +392,9 @@ public class LlamaInstanceCard : UserControl
         string initialText = _extraBox.Text.Replace(" --", "\n--");
 
         var editBox = new TextBox
-        {
-            Text = initialText,
+        {   // 微软bug，acceptsreturn 必须在最前面。 see: https://github.com/microsoft/microsoft-ui-xaml/issues/10956
             AcceptsReturn = true,
+            Text = initialText,
             TextWrapping = TextWrapping.Wrap,
             Height = 200,
             Width = 460,
