@@ -56,7 +56,7 @@ public class LlamaInstanceCard : UserControl
         // 单色启停图标与按钮
         _startStopIcon = new SymbolIcon(Symbol.Play);
         _startStopText = new TextBlock { Text = "Start", VerticalAlignment = VerticalAlignment.Center };
-        
+
         _startStopBtn = new Button
         {
             Style = (Style)Application.Current.Resources["AccentButtonStyle"],
@@ -87,11 +87,11 @@ public class LlamaInstanceCard : UserControl
         _nglBox = new TextBox { Text = "99", Width = 80 };
         _mmprojBox = new TextBox { PlaceholderText = "Multimodal projector (.gguf, optional)", Width = 360 };
 
-        _extraBox = new TextBox 
-        { 
-            PlaceholderText = "Click to configure extra args (e.g. --host 0.0.0.0)", 
+        _extraBox = new TextBox
+        {
+            PlaceholderText = "Click to configure extra args (e.g. --host 0.0.0.0)",
             Width = 360,
-            IsReadOnly = true 
+            IsReadOnly = true
         };
         _extraBox.Tapped += async (s, e) => await ShowExtraArgsDialogAsync();
 
@@ -209,7 +209,7 @@ public class LlamaInstanceCard : UserControl
                         {
                             new TextBlock { Text = "Extra Args:", Width = 85, VerticalAlignment = VerticalAlignment.Center },
                             _extraBox,
-                            editExtraBtn 
+                            editExtraBtn
 
                         }
                     }

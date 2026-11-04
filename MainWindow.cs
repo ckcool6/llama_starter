@@ -104,7 +104,7 @@ public sealed class MainWindow : Window
         };
 
         // 直接在 TextBox 上开启垂直滚动条，并固定高度
-       _logConsole = new TextBox
+        _logConsole = new TextBox
         {
             IsReadOnly = true,
             AcceptsReturn = true,
@@ -186,13 +186,13 @@ public sealed class MainWindow : Window
                             }
                         }
                     },
-                    _logConsole 
+                    _logConsole
                 }
             }
         };
         Grid.SetColumn((FrameworkElement)((Grid)logPanel.Child).Children[0], 0);
         Grid.SetColumn(((FrameworkElement)((Grid)((Grid)logPanel.Child).Children[0]).Children[1]), 1);
-        Grid.SetRow(_logConsole, 1); 
+        Grid.SetRow(_logConsole, 1);
 
         // 4. 根布局
         var rootGrid = new Grid();
@@ -216,7 +216,7 @@ public sealed class MainWindow : Window
     }
 
     public static Button CreateIconButton(Symbol symbol, string text, Style? style = null)
-    {   
+    {
         var btn = new Button();
         if (style != null)
         {
@@ -271,7 +271,7 @@ public sealed class MainWindow : Window
     private void AddCard()
     {
         var card = new LlamaInstanceCard(_cardCounter++, () => _exePathBox.Text, AppendCardLog, _hwnd);
-        
+
         // 点击 View Log 切换到只显示该卡片日志
         card.ViewLogRequested += c =>
         {
