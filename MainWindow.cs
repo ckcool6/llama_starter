@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Threading.Tasks;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
@@ -20,8 +21,11 @@ public sealed class MainWindow : Window
     private readonly TextBox _exePathBox;
     private readonly TextBox _logConsole;
     private readonly ScrollViewer _logScrollViewer;
+    private readonly TextBlock _logTitleText;
 
     private readonly List<LlamaInstanceCard> _cardList = new();
+    private readonly StringBuilder _allLogsBuffer = new();
+    private LlamaInstanceCard? _selectedLogCard = null;
     private int _cardCounter = 1;
 
     public MainWindow()
@@ -78,6 +82,13 @@ public sealed class MainWindow : Window
         };
 
         // 3. 底部实时日志区域
+        _logTitleText = new TextBlock
+        {
+            Text = "Live Output Console (All Instances)",
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
         _logConsole = new TextBox
         {
             IsReadOnly = true,
@@ -95,9 +106,32 @@ public sealed class MainWindow : Window
             Height = 160
         };
 
+        // 切换回所有日志
+        var showAllLogsBtn = CreateIconButton(Symbol.List, "All Logs");
+        showAllLogsBtn.FontSize = 12;
+        showAllLogsBtn.Click += (s, e) =>
+        {
+            _selectedLogCard = null;
+            _logTitleText.Text = "Live Output Console (All Instances)";
+            _logConsole.Text = _allLogsBuffer.ToString();
+            ScrollLogToEnd();
+        };
+
+        // 清空当前视图日志
         var clearLogBtn = CreateIconButton(Symbol.Clear, "Clear Logs");
         clearLogBtn.FontSize = 12;
-        clearLogBtn.Click += (s, e) => _logConsole.Text = string.Empty;
+        clearLogBtn.Click += (s, e) =>
+        {
+            _logConsole.Text = string.Empty;
+            if (_selectedLogCard != null)
+            {
+                _selectedLogCard.ClearLogs();
+            }
+            else
+            {
+                _allLogsBuffer.Clear();
+            }
+        };
 
         var logPanel = new Border
         {
@@ -125,15 +159,21 @@ public sealed class MainWindow : Window
                         },
                         Children =
                         {
-                            new TextBlock { Text = "Live Output Console", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center },
-                            clearLogBtn
+                            _logTitleText,
+                            new StackPanel
+                            {
+                                Orientation = Orientation.Horizontal,
+                                Spacing = 8,
+                                Children = { showAllLogsBtn, clearLogBtn }
+                            }
                         }
                     },
                     _logScrollViewer
                 }
             }
         };
-        Grid.SetColumn(clearLogBtn, 1);
+        Grid.SetColumn((FrameworkElement)((Grid)logPanel.Child).Children[0], 0);
+        Grid.SetColumn(((FrameworkElement)((Grid)((Grid)logPanel.Child).Children[0]).Children[1]), 1);
         Grid.SetRow(_logScrollViewer, 1);
 
         // 4. 根布局
@@ -157,9 +197,6 @@ public sealed class MainWindow : Window
         AddCard();
     }
 
-    /// <summary>
-    /// 辅助方法：生成标准 WinUI 3 单色线性图标按钮
-    /// </summary>
     public static Button CreateIconButton(Symbol symbol, string text, Style? style = null)
     {   
         var btn = new Button();
@@ -192,7 +229,7 @@ public sealed class MainWindow : Window
         if (file != null)
         {
             _exePathBox.Text = file.Path;
-            AppendLog($"Set Server Path: {file.Path}");
+            AppendSystemLog($"Set Server Path: {file.Path}");
         }
     }
 
@@ -209,15 +246,35 @@ public sealed class MainWindow : Window
         }
         else
         {
-            AppendLog("[WARN] Path does not exist, cannot open in Explorer.");
+            AppendSystemLog("[WARN] Path does not exist, cannot open in Explorer.");
         }
     }
 
     private void AddCard()
     {
-        var card = new LlamaInstanceCard(_cardCounter++, () => _exePathBox.Text, AppendLog, _hwnd);
+        var card = new LlamaInstanceCard(_cardCounter++, () => _exePathBox.Text, AppendCardLog, _hwnd);
+        
+        // 点击 View Log 切换到只显示该卡片日志
+        card.ViewLogRequested += c =>
+        {
+            _selectedLogCard = c;
+            _logTitleText.Text = $"Live Output Console (Instance #{c.Id})";
+            _logConsole.Text = c.GetLogs();
+            ScrollLogToEnd();
+        };
+
+        // 删除卡片回调
         card.DeleteRequested += c =>
         {
+            // 如果删掉的是当前正在查看的卡片，切回全部日志视图
+            if (_selectedLogCard == c)
+            {
+                _selectedLogCard = null;
+                _logTitleText.Text = "Live Output Console (All Instances)";
+                _logConsole.Text = _allLogsBuffer.ToString();
+                ScrollLogToEnd();
+            }
+
             _cardList.Remove(c);
             _cardsContainer.Children.Remove(c);
 
@@ -235,14 +292,51 @@ public sealed class MainWindow : Window
         _cardsScrollViewer.ChangeView(null, _cardsScrollViewer.ScrollableHeight, null);
     }
 
-    private void AppendLog(string message)
+    private void AppendSystemLog(string message)
     {
         DispatcherQueue.TryEnqueue(() =>
         {
-            _logConsole.Text += $"[{DateTime.Now:HH:mm:ss}] {message}\n";
-            _logConsole.Select(_logConsole.Text.Length, 0);
-            _logScrollViewer.ChangeView(null, _logScrollViewer.ScrollableHeight, null);
+            string time = DateTime.Now.ToString("HH:mm:ss");
+            string line = $"[{time}] [System] {message}\n";
+            _allLogsBuffer.Append(line);
+
+            if (_selectedLogCard == null)
+            {
+                _logConsole.Text += line;
+                ScrollLogToEnd();
+            }
         });
+    }
+
+    private void AppendCardLog(LlamaInstanceCard card, string rawMessage)
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            string time = DateTime.Now.ToString("HH:mm:ss");
+            string globalLine = $"[{time}] [#{card.Id}] {rawMessage}\n";
+            string instanceLine = $"[{time}] {rawMessage}\n";
+
+            _allLogsBuffer.Append(globalLine);
+
+            // 如果当前在看这个卡片，显示纯净的单实例日志
+            if (_selectedLogCard == card)
+            {
+                _logConsole.Text += instanceLine;
+                ScrollLogToEnd();
+            }
+            // 如果当前是全局视图，显示带 [#{id}] 标识的日志
+            else if (_selectedLogCard == null)
+            {
+                _logConsole.Text += globalLine;
+                ScrollLogToEnd();
+            }
+        });
+    }
+
+    private void ScrollLogToEnd()
+    {
+        _logConsole.Select(_logConsole.Text.Length, 0);
+        _logScrollViewer.ChangeView(null, _logScrollViewer.ScrollableHeight, null);
     }
 
     private void SetupWindowStyle()

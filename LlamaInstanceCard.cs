@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Threading.Tasks;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
@@ -15,8 +16,9 @@ public class LlamaInstanceCard : UserControl
 {
     private readonly int _id;
     private readonly Func<string> _getExePathFunc;
-    private readonly Action<string> _logCallback;
+    private readonly Action<LlamaInstanceCard, string> _logCallback;
     private readonly nint _windowHandle;
+    private readonly StringBuilder _instanceLogBuffer = new();
 
     private Process? _process;
     private readonly Button _startStopBtn;
@@ -31,10 +33,12 @@ public class LlamaInstanceCard : UserControl
     private readonly TextBox _mmprojBox;
     private readonly TextBox _extraBox;
 
+    public int Id => _id;
     public bool IsRunning => _process != null && !_process.HasExited;
     public event Action<LlamaInstanceCard>? DeleteRequested;
+    public event Action<LlamaInstanceCard>? ViewLogRequested;
 
-    public LlamaInstanceCard(int id, Func<string> getExePathFunc, Action<string> logCallback, nint windowHandle)
+    public LlamaInstanceCard(int id, Func<string> getExePathFunc, Action<LlamaInstanceCard, string> logCallback, nint windowHandle)
     {
         _id = id;
         _getExePathFunc = getExePathFunc;
@@ -64,6 +68,10 @@ public class LlamaInstanceCard : UserControl
             }
         };
         _startStopBtn.Click += (s, e) => ToggleStartStop();
+
+        // 👈 View Log 按钮
+        var viewLogBtn = MainWindow.CreateIconButton(Symbol.Document, "View Log");
+        viewLogBtn.Click += (s, e) => ViewLogRequested?.Invoke(this);
 
         // 单色删除按钮
         var deleteBtn = MainWindow.CreateIconButton(Symbol.Delete, "Delete");
@@ -110,7 +118,7 @@ public class LlamaInstanceCard : UserControl
                 Spacing = 12,
                 Children =
                 {
-                    // 顶部头部状态与操作按钮
+                    // 顶部头部：状态与操作按钮（Start / View Log / Delete）
                     new Grid
                     {
                         ColumnDefinitions =
@@ -134,7 +142,7 @@ public class LlamaInstanceCard : UserControl
                             {
                                 Orientation = Orientation.Horizontal,
                                 Spacing = 8,
-                                Children = { _startStopBtn, deleteBtn }
+                                Children = { _startStopBtn, viewLogBtn, deleteBtn }
                             }
                         }
                     },
@@ -195,6 +203,18 @@ public class LlamaInstanceCard : UserControl
         Grid.SetColumn((FrameworkElement)((Grid)((StackPanel)((Border)Content).Child).Children[0]).Children[1], 1);
     }
 
+    public string GetLogs() => _instanceLogBuffer.ToString();
+
+    public void ClearLogs() => _instanceLogBuffer.Clear();
+
+    private void Log(string message)
+    {
+        string time = DateTime.Now.ToString("HH:mm:ss");
+        string logLine = $"[{time}] {message}";
+        _instanceLogBuffer.AppendLine(logLine);
+        _logCallback(this, message);
+    }
+
     private async Task PickGgufFileAsync(TextBox targetBox)
     {
         var picker = new FileOpenPicker();
@@ -217,7 +237,7 @@ public class LlamaInstanceCard : UserControl
         string exePath = _getExePathFunc();
         if (string.IsNullOrWhiteSpace(exePath) || !File.Exists(exePath))
         {
-            _logCallback($"[Instance #{_id}] [ERROR] Executable path is invalid or file does not exist!");
+            Log("[ERROR] Executable path is invalid or file does not exist!");
             return;
         }
 
@@ -239,8 +259,8 @@ public class LlamaInstanceCard : UserControl
         try
         {
             _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
-            _process.OutputDataReceived += (s, e) => { if (e.Data != null) _logCallback($"[#{_id}] {e.Data}"); };
-            _process.ErrorDataReceived += (s, e) => { if (e.Data != null) _logCallback($"[#{_id}] {e.Data}"); };
+            _process.OutputDataReceived += (s, e) => { if (e.Data != null) Log(e.Data); };
+            _process.ErrorDataReceived += (s, e) => { if (e.Data != null) Log(e.Data); };
             _process.Exited += (s, e) => DispatcherQueue.TryEnqueue(UpdateStoppedUi);
 
             _process.Start();
@@ -255,11 +275,11 @@ public class LlamaInstanceCard : UserControl
             _startStopText.Text = "Stop";
             _startStopBtn.ClearValue(Button.StyleProperty);
 
-            _logCallback($"[Instance #{_id}] [STARTED] Args: {args}");
+            Log($"[STARTED] Args: {args}");
         }
         catch (Exception ex)
         {
-            _logCallback($"[Instance #{_id}] [ERROR] {ex.Message}");
+            Log($"[ERROR] {ex.Message}");
             UpdateStoppedUi();
         }
     }
@@ -272,11 +292,11 @@ public class LlamaInstanceCard : UserControl
             _process?.Kill(entireProcessTree: true);
             _process?.Dispose();
             _process = null;
-            _logCallback($"[Instance #{_id}] [STOPPED] Process terminated.");
+            Log("[STOPPED] Process terminated.");
         }
         catch (Exception ex)
         {
-            _logCallback($"[Instance #{_id}] [ERROR] Stop failed: {ex.Message}");
+            Log($"[ERROR] Stop failed: {ex.Message}");
         }
         finally
         {
