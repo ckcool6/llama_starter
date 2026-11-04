@@ -64,7 +64,7 @@
     <PublishReadyToRun Condition="'$(Configuration)' == 'Debug'">False</PublishReadyToRun>
     <PublishReadyToRun Condition="'$(Configuration)' != 'Debug'">True</PublishReadyToRun>
     
-    <!-- ⚠️ WinUI 3 务必保持 Trimmed 为 False，否则启动会因为缺少反射元数据而闪退 -->
+    <!-- WinUI 3 务必保持 Trimmed 为 False，否则启动会因为缺少反射元数据而闪退 -->
     <PublishTrimmed>False</PublishTrimmed>
   </PropertyGroup>
 </Project>
