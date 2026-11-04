@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Threading.Tasks;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -13,6 +14,7 @@ namespace MyMarkupApp;
 
 public sealed class MainWindow : Window
 {
+    private readonly nint _hwnd;
     private readonly StackPanel _cardsContainer;
     private readonly ScrollViewer _cardsScrollViewer;
     private readonly TextBox _exePathBox;
@@ -24,6 +26,7 @@ public sealed class MainWindow : Window
 
     public MainWindow()
     {
+        _hwnd = WindowNative.GetWindowHandle(this);
         Title = "llama-server Multi-Instance Manager (Fluent WinUI 3)";
         SetupWindowStyle();
 
@@ -159,10 +162,10 @@ public sealed class MainWindow : Window
     /// </summary>
     public static Button CreateIconButton(Symbol symbol, string text, Style? style = null)
     {   
-        var btn = new Button(); // 👈 默认保留系统原生的圆角样式
+        var btn = new Button();
         if (style != null)
         {
-            btn.Style = style;  // 只有真正传了 AccentButtonStyle 等样式时才覆盖
+            btn.Style = style;
         }
 
         btn.Content = new StackPanel
@@ -178,13 +181,12 @@ public sealed class MainWindow : Window
         return btn;
     }
 
-    private async System.Threading.Tasks.Task BrowseExeFileAsync()
+    private async Task BrowseExeFileAsync()
     {
         var picker = new FileOpenPicker();
         picker.FileTypeFilter.Add(".exe");
 
-        var hwnd = WindowNative.GetWindowHandle(this);
-        InitializeWithWindow.Initialize(picker, hwnd);
+        InitializeWithWindow.Initialize(picker, _hwnd);
 
         var file = await picker.PickSingleFileAsync();
         if (file != null)
@@ -213,11 +215,17 @@ public sealed class MainWindow : Window
 
     private void AddCard()
     {
-        var card = new LlamaInstanceCard(_cardCounter++, () => _exePathBox.Text, AppendLog);
+        var card = new LlamaInstanceCard(_cardCounter++, () => _exePathBox.Text, AppendLog, _hwnd);
         card.DeleteRequested += c =>
         {
             _cardList.Remove(c);
             _cardsContainer.Children.Remove(c);
+
+            // 方案 A：所有卡片清空时重置计数器从 1 开始
+            if (_cardList.Count == 0)
+            {
+                _cardCounter = 1;
+            }
         };
 
         _cardList.Add(card);

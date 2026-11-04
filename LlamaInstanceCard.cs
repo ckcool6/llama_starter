@@ -1,10 +1,13 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Threading.Tasks;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Windows.Storage.Pickers;
+using WinRT.Interop;
 
 namespace MyMarkupApp;
 
@@ -13,6 +16,7 @@ public class LlamaInstanceCard : UserControl
     private readonly int _id;
     private readonly Func<string> _getExePathFunc;
     private readonly Action<string> _logCallback;
+    private readonly nint _windowHandle;
 
     private Process? _process;
     private readonly Button _startStopBtn;
@@ -30,11 +34,12 @@ public class LlamaInstanceCard : UserControl
     public bool IsRunning => _process != null && !_process.HasExited;
     public event Action<LlamaInstanceCard>? DeleteRequested;
 
-    public LlamaInstanceCard(int id, Func<string> getExePathFunc, Action<string> logCallback)
+    public LlamaInstanceCard(int id, Func<string> getExePathFunc, Action<string> logCallback, nint windowHandle)
     {
         _id = id;
         _getExePathFunc = getExePathFunc;
         _logCallback = logCallback;
+        _windowHandle = windowHandle;
 
         _statusBadge = new TextBlock
         {
@@ -72,8 +77,26 @@ public class LlamaInstanceCard : UserControl
         _portBox = new TextBox { Text = (8080 + id - 1).ToString(), Width = 80 };
         _ctxBox = new TextBox { Text = "4096", Width = 80 };
         _nglBox = new TextBox { Text = "99", Width = 80 };
-        _mmprojBox = new TextBox { PlaceholderText = "Multimodal projector (.gguf, optional)", Width = 260 };
+        _mmprojBox = new TextBox { PlaceholderText = "Multimodal projector (.gguf, optional)", Width = 360 };
         _extraBox = new TextBox { PlaceholderText = "Extra args (e.g. --host 0.0.0.0)", Width = 360 };
+
+        // 为 -m 配置浏览按钮
+        var browseModelBtn = new Button
+        {
+            Content = new SymbolIcon(Symbol.OpenFile),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        ToolTipService.SetToolTip(browseModelBtn, "Browse Model (.gguf)");
+        browseModelBtn.Click += async (s, e) => await PickGgufFileAsync(_modelBox);
+
+        // 为 --mmproj 配置浏览按钮
+        var browseMmprojBtn = new Button
+        {
+            Content = new SymbolIcon(Symbol.OpenFile),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        ToolTipService.SetToolTip(browseMmprojBtn, "Browse Multimodal Projector (.gguf)");
+        browseMmprojBtn.Click += async (s, e) => await PickGgufFileAsync(_mmprojBox);
 
         Content = new Border
         {
@@ -87,6 +110,7 @@ public class LlamaInstanceCard : UserControl
                 Spacing = 12,
                 Children =
                 {
+                    // 顶部头部状态与操作按钮
                     new Grid
                     {
                         ColumnDefinitions =
@@ -114,6 +138,7 @@ public class LlamaInstanceCard : UserControl
                             }
                         }
                     },
+                    // -m (Model) 路径配置 + 浏览按钮
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -121,9 +146,11 @@ public class LlamaInstanceCard : UserControl
                         Children =
                         {
                             new TextBlock { Text = "-m (Model):", Width = 85, VerticalAlignment = VerticalAlignment.Center },
-                            _modelBox
+                            _modelBox,
+                            browseModelBtn
                         }
                     },
+                    // 端口、上下文参数
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -138,6 +165,7 @@ public class LlamaInstanceCard : UserControl
                             _nglBox
                         }
                     },
+                    // --mmproj 路径配置 + 浏览按钮
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -145,9 +173,11 @@ public class LlamaInstanceCard : UserControl
                         Children =
                         {
                             new TextBlock { Text = "--mmproj:", Width = 85, VerticalAlignment = VerticalAlignment.Center },
-                            _mmprojBox
+                            _mmprojBox,
+                            browseMmprojBtn
                         }
                     },
+                    // 附加额外参数
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -163,6 +193,21 @@ public class LlamaInstanceCard : UserControl
         };
 
         Grid.SetColumn((FrameworkElement)((Grid)((StackPanel)((Border)Content).Child).Children[0]).Children[1], 1);
+    }
+
+    private async Task PickGgufFileAsync(TextBox targetBox)
+    {
+        var picker = new FileOpenPicker();
+        picker.FileTypeFilter.Add(".gguf");
+        picker.FileTypeFilter.Add("*");
+
+        InitializeWithWindow.Initialize(picker, _windowHandle);
+
+        var file = await picker.PickSingleFileAsync();
+        if (file != null)
+        {
+            targetBox.Text = file.Path;
+        }
     }
 
     public void Start()
