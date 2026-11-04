@@ -65,7 +65,34 @@ public sealed class MainWindow : Window
         addBtn.Click += (s, e) => AddCard();
 
         var startAllBtn = CreateIconButton(Symbol.Play, "Start All", (Style)Application.Current.Resources["AccentButtonStyle"]);
-        startAllBtn.Click += (s, e) => { foreach (var card in _cardList) card.Start(); };
+        startAllBtn.Click += async (s, e) =>
+            {
+                startAllBtn.IsEnabled = false;
+                try
+                {
+                    foreach (var card in _cardList)
+                    {
+                        if (card.IsRunning) continue;
+
+                        AppendSystemLog($"Starting Instance #{card.Id}... Waiting for model to load into VRAM.");
+
+
+                        bool success = await card.StartAsync(TimeSpan.FromSeconds(180));
+
+                        if (!success)
+                        {
+                            AppendSystemLog($"[ERROR] Instance #{card.Id} failed to start. Sequential startup aborted.");
+                            break;
+                        }
+
+                        AppendSystemLog($"Instance #{card.Id} is READY. Proceeding to next instance...");
+                    }
+                }
+                finally
+                {
+                    startAllBtn.IsEnabled = true;
+                }
+            };
 
         var stopAllBtn = CreateIconButton(Symbol.Stop, "Stop All");
         stopAllBtn.Click += (s, e) => { foreach (var card in _cardList) card.Stop(); };

@@ -9,6 +9,8 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
+using System.Net.Http;
+
 
 namespace MyMarkupApp;
 
@@ -299,6 +301,52 @@ public class LlamaInstanceCard : UserControl
             Log($"[ERROR] {ex.Message}");
             UpdateStoppedUi();
         }
+    }
+
+    public async Task<bool> StartAsync(TimeSpan timeout)
+    {
+        if (IsRunning) return true;
+
+        Start();
+        if (!IsRunning) return false;
+
+        _statusBadge.Text = "Loading Model...";
+        _statusBadge.Foreground = new SolidColorBrush(Colors.DarkOrange);
+
+        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+        string url = $"http://127.0.0.1:{_portBox.Text.Trim()}/health";
+        var startTime = DateTime.Now;
+
+        while (DateTime.Now - startTime < timeout)
+        {
+
+            if (_process == null || _process.HasExited)
+            {
+                Log("[ERROR] Server process exited unexpectedly during startup.");
+                return false;
+            }
+
+            try
+            {
+                var response = await httpClient.GetAsync(url);
+                if (response.IsSuccessStatusCode)
+                {
+                    _statusBadge.Text = $"Running (PID: {_process.Id})";
+                    _statusBadge.Foreground = new SolidColorBrush(Colors.SeaGreen);
+                    Log("[READY] Model fully loaded and HTTP server is ready.");
+                    return true;
+                }
+            }
+            catch
+            {
+
+            }
+
+            await Task.Delay(1000);
+        }
+
+        Log("[ERROR] Startup timed out waiting for server to be ready.");
+        return false;
     }
 
     public void Stop()
