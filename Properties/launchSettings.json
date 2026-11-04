@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "MyMarkupApp (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "MyMarkupApp (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
