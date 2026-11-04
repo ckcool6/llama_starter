@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.UI;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -17,25 +18,36 @@ namespace MyMarkupApp;
 
 public sealed class MainWindow : Window
 {
+    // 配置文件持久化路径（保存在进程同级目录下）
     private static readonly string ConfigFilePath = Path.Combine(
-    Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory,
-    "config.json"
+        Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory,
+        "config.json"
     );
+
+    private const int MaxGlobalLogLength = 150_000; // 全局日志缓冲最大保留字符（约 150KB），防止无限膨胀爆内存
 
     private readonly nint _hwnd;
     private readonly StackPanel _cardsContainer;
     private readonly ScrollViewer _cardsScrollViewer;
     private readonly TextBox _exePathBox;
     private readonly TextBox _logConsole;
-    private readonly ScrollViewer _logScrollViewer;
     private readonly TextBlock _logTitleText;
 
     private readonly List<LlamaInstanceCard> _cardList = new();
     private readonly StringBuilder _allLogsBuffer = new();
+    private readonly object _logLock = new(); // 保证多进程并发吐日志时的线程安全锁
+
     private LlamaInstanceCard? _selectedLogCard = null;
     private int _cardCounter = 1;
     private ScrollViewer? _logInternalScrollViewer;
 
+    // 定时批量刷新机制（100ms 节流）：彻底解耦进程高频日志与 UI 渲染，杜绝界面卡死
+    private readonly DispatcherTimer _logFlushTimer;
+    private bool _isLogDirty = false;
+
+    /// <summary>
+    /// 递归遍历视觉树，获取 TextBox 内部自带的 ScrollViewer
+    /// </summary>
     private static ScrollViewer? FindScrollViewer(DependencyObject root)
     {
         if (root is ScrollViewer sv) return sv;
@@ -55,7 +67,9 @@ public sealed class MainWindow : Window
         Title = "llama-server Multi-Instance Manager (Fluent WinUI 3)";
         SetupWindowStyle();
 
-        // 1. 顶部栏 (Exe 路径 + 统一单色矢量图标按钮)
+        // =========================================================================
+        // 1. 顶部操作栏 (Server Exe 路径配置与全局启停)
+        // =========================================================================
         _exePathBox = new TextBox
         {
             PlaceholderText = @"C:\llama.cpp\build\bin\llama-server.exe",
@@ -77,7 +91,8 @@ public sealed class MainWindow : Window
             startAllBtn.IsEnabled = false;
             try
             {
-                foreach (var card in _cardList)
+                // 使用 .ToList() 创建快照，防止遍历中修改卡片列表导致迭代器崩溃
+                foreach (var card in _cardList.ToList())
                 {
                     if (card.IsRunning) continue;
 
@@ -119,7 +134,9 @@ public sealed class MainWindow : Window
             }
         };
 
-        // 2. 中间卡片滚动区
+        // =========================================================================
+        // 2. 中间卡片动态滚动区
+        // =========================================================================
         _cardsContainer = new StackPanel { Spacing = 16 };
         _cardsScrollViewer = new ScrollViewer
         {
@@ -127,7 +144,9 @@ public sealed class MainWindow : Window
             Margin = new Thickness(24, 0, 24, 12)
         };
 
-        // 3. 底部实时日志区域
+        // =========================================================================
+        // 3. 底部实时日志面板（使用清晰明确的 Grid 布局，杜绝层级套娃）
+        // =========================================================================
         _logTitleText = new TextBlock
         {
             Text = "Live Output Console (All Instances)",
@@ -146,14 +165,7 @@ public sealed class MainWindow : Window
             BorderThickness = new Thickness(0),
             Background = new SolidColorBrush(Colors.Transparent)
         };
-
         ScrollViewer.SetVerticalScrollBarVisibility(_logConsole, ScrollBarVisibility.Auto);
-
-        _logScrollViewer = new ScrollViewer
-        {
-            Content = _logConsole,
-            Height = 160
-        };
 
         var showAllLogsBtn = CreateIconButton(Symbol.List, "All Logs");
         showAllLogsBtn.FontSize = 12;
@@ -161,24 +173,61 @@ public sealed class MainWindow : Window
         {
             _selectedLogCard = null;
             _logTitleText.Text = "Live Output Console (All Instances)";
-            _logConsole.Text = _allLogsBuffer.ToString();
-            ScrollLogToEnd();
+            RefreshConsoleViewImmediate();
         };
 
         var clearLogBtn = CreateIconButton(Symbol.Clear, "Clear Logs");
         clearLogBtn.FontSize = 12;
         clearLogBtn.Click += (s, e) =>
         {
-            _logConsole.Text = string.Empty;
             if (_selectedLogCard != null)
             {
                 _selectedLogCard.ClearLogs();
             }
             else
             {
-                _allLogsBuffer.Clear();
+                lock (_logLock)
+                {
+                    _allLogsBuffer.Clear();
+                }
+            }
+            _logConsole.Text = string.Empty;
+        };
+
+        // 日志区头部栏 (左侧标题 + 右侧操作按钮)
+        var logHeaderGrid = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+                new ColumnDefinition { Width = GridLength.Auto }
             }
         };
+        Grid.SetColumn(_logTitleText, 0);
+        logHeaderGrid.Children.Add(_logTitleText);
+
+        var logButtonsPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            Children = { showAllLogsBtn, clearLogBtn }
+        };
+        Grid.SetColumn(logButtonsPanel, 1);
+        logHeaderGrid.Children.Add(logButtonsPanel);
+
+        // 日志区纵向布局 (第 0 行头部，第 1 行输出终端文本框)
+        var logContentGrid = new Grid
+        {
+            RowDefinitions =
+            {
+                new RowDefinition { Height = GridLength.Auto },
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }
+            }
+        };
+        Grid.SetRow(logHeaderGrid, 0);
+        Grid.SetRow(_logConsole, 1);
+        logContentGrid.Children.Add(logHeaderGrid);
+        logContentGrid.Children.Add(_logConsole);
 
         var logPanel = new Border
         {
@@ -188,46 +237,21 @@ public sealed class MainWindow : Window
             Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
             BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
             BorderThickness = new Thickness(1),
-            Child = new Grid
+            Child = logContentGrid
+        };
+
+        // =========================================================================
+        // 4. 主窗口根布局拼接
+        // =========================================================================
+        var rootGrid = new Grid
+        {
+            RowDefinitions =
             {
-                RowDefinitions =
-                {
-                    new RowDefinition { Height = GridLength.Auto },
-                    new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }
-                },
-                Children =
-                {
-                    new Grid
-                    {
-                        ColumnDefinitions =
-                        {
-                            new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
-                            new ColumnDefinition { Width = GridLength.Auto }
-                        },
-                        Children =
-                        {
-                            _logTitleText,
-                            new StackPanel
-                            {
-                                Orientation = Orientation.Horizontal,
-                                Spacing = 8,
-                                Children = { showAllLogsBtn, clearLogBtn }
-                            }
-                        }
-                    },
-                    _logConsole
-                }
+                new RowDefinition { Height = GridLength.Auto },
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Star) },
+                new RowDefinition { Height = GridLength.Auto }
             }
         };
-        Grid.SetColumn((FrameworkElement)((Grid)logPanel.Child).Children[0], 0);
-        Grid.SetColumn(((FrameworkElement)((Grid)((Grid)logPanel.Child).Children[0]).Children[1]), 1);
-        Grid.SetRow(_logConsole, 1);
-
-        // 4. 根布局
-        var rootGrid = new Grid();
-        rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        rootGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         Grid.SetRow(topBar, 0);
         Grid.SetRow(_cardsScrollViewer, 1);
@@ -238,25 +262,39 @@ public sealed class MainWindow : Window
         rootGrid.Children.Add(logPanel);
 
         Content = rootGrid;
+        rootGrid.ActualThemeChanged += (s, e) => UpdateTitleBarTheme();
+        UpdateTitleBarTheme();
 
-        // 退出时：保存配置到 json 并停止所有进程
+        // =========================================================================
+        // 5. 启动日志节流定时器 (100ms 刷新一次界面，消除高频 IO 带来的卡顿)
+        // =========================================================================
+        _logFlushTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+        _logFlushTimer.Tick += (s, e) =>
+        {
+            if (_isLogDirty)
+            {
+                _isLogDirty = false;
+                RefreshConsoleViewImmediate();
+            }
+        };
+        _logFlushTimer.Start();
+
+        // 窗口退出时保存配置并强杀所有后台子进程
         Closed += (s, e) =>
         {
+            _logFlushTimer.Stop();
             SaveConfig();
             foreach (var card in _cardList) card.Stop();
         };
 
-        // 启动时读取本地配置
+        // 初始化读取配置
         LoadConfig();
     }
 
     public static Button CreateIconButton(Symbol symbol, string text, Style? style = null)
     {
         var btn = new Button();
-        if (style != null)
-        {
-            btn.Style = style;
-        }
+        if (style != null) btn.Style = style;
 
         btn.Content = new StackPanel
         {
@@ -303,7 +341,6 @@ public sealed class MainWindow : Window
         }
     }
 
-    // 支持传入已存在的配置
     private void AddCard(InstanceConfig? config = null)
     {
         int id = config?.Id ?? _cardCounter++;
@@ -323,8 +360,7 @@ public sealed class MainWindow : Window
         {
             _selectedLogCard = c;
             _logTitleText.Text = $"Live Output Console (Instance #{c.Id})";
-            _logConsole.Text = c.GetLogs();
-            ScrollLogToEnd();
+            RefreshConsoleViewImmediate();
         };
 
         card.DeleteRequested += c =>
@@ -333,8 +369,7 @@ public sealed class MainWindow : Window
             {
                 _selectedLogCard = null;
                 _logTitleText.Text = "Live Output Console (All Instances)";
-                _logConsole.Text = _allLogsBuffer.ToString();
-                ScrollLogToEnd();
+                RefreshConsoleViewImmediate();
             }
 
             _cardList.Remove(c);
@@ -345,7 +380,6 @@ public sealed class MainWindow : Window
                 _cardCounter = 1;
             }
 
-            // 删除卡片后自动保存一次
             SaveConfig();
         };
 
@@ -407,49 +441,71 @@ public sealed class MainWindow : Window
             AppendSystemLog($"[WARN] Failed to load config.json: {ex.Message}");
         }
 
-        // 如果没有配置文件或为空，默认添加一张空卡片
+        // 若无配置文件，默认新增一个空实例卡片
         AddCard();
     }
 
     #endregion
 
+    #region 高性能日志记录与视图刷新
+
     private void AppendSystemLog(string message)
     {
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            string time = DateTime.Now.ToString("HH:mm:ss");
-            string line = $"[{time}] [System] {message}\n";
-            _allLogsBuffer.Append(line);
+        string time = DateTime.Now.ToString("HH:mm:ss");
+        string line = $"[{time}] [System] {message}";
 
-            if (_selectedLogCard == null)
-            {
-                _logConsole.Text += line;
-                ScrollLogToEnd();
-            }
-        });
+        lock (_logLock)
+        {
+            _allLogsBuffer.AppendLine(line);
+            TrimBufferIfNeeded(_allLogsBuffer);
+        }
+
+        _isLogDirty = true;
     }
 
     private void AppendCardLog(LlamaInstanceCard card, string rawMessage)
     {
-        DispatcherQueue.TryEnqueue(() =>
+        string time = DateTime.Now.ToString("HH:mm:ss");
+        string globalLine = $"[{time}] [#{card.Id}] {rawMessage}";
+
+        lock (_logLock)
         {
-            string time = DateTime.Now.ToString("HH:mm:ss");
-            string globalLine = $"[{time}] [#{card.Id}] {rawMessage}\n";
-            string instanceLine = $"[{time}] {rawMessage}\n";
+            _allLogsBuffer.AppendLine(globalLine);
+            TrimBufferIfNeeded(_allLogsBuffer);
+        }
 
-            _allLogsBuffer.Append(globalLine);
+        // 仅在当前处于“全局日志”或“正在观察该实例”时标记界面需要刷新
+        if (_selectedLogCard == null || _selectedLogCard == card)
+        {
+            _isLogDirty = true;
+        }
+    }
 
-            if (_selectedLogCard == card)
+    private static void TrimBufferIfNeeded(StringBuilder sb)
+    {
+        if (sb.Length > MaxGlobalLogLength)
+        {
+            sb.Remove(0, sb.Length - (MaxGlobalLogLength - 20_000));
+        }
+    }
+
+    private void RefreshConsoleViewImmediate()
+    {
+        string content;
+        if (_selectedLogCard != null)
+        {
+            content = _selectedLogCard.GetLogs();
+        }
+        else
+        {
+            lock (_logLock)
             {
-                _logConsole.Text += instanceLine;
-                ScrollLogToEnd();
+                content = _allLogsBuffer.ToString();
             }
-            else if (_selectedLogCard == null)
-            {
-                _logConsole.Text += globalLine;
-                ScrollLogToEnd();
-            }
-        });
+        }
+
+        _logConsole.Text = content;
+        ScrollLogToEnd();
     }
 
     private void ScrollLogToEnd()
@@ -463,27 +519,63 @@ public sealed class MainWindow : Window
         }
     }
 
+    #endregion
+
     private void SetupWindowStyle()
     {
         SystemBackdrop = new MicaBackdrop();
         ExtendsContentIntoTitleBar = true;
 
-        var titleBar = AppWindow.TitleBar;
-        titleBar.ButtonBackgroundColor = Colors.Transparent;
-        titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
-        titleBar.ButtonForegroundColor = Colors.Black;
-        titleBar.ButtonHoverForegroundColor = Colors.Black;
+        // 统一更新标题栏按钮颜色
+        UpdateTitleBarTheme();
 
         int newWidth = 1350;
         int newHeight = 920;
         AppWindow.Resize(new Windows.Graphics.SizeInt32(newWidth, newHeight));
 
-        var displayArea = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary);
+        var displayArea = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Nearest);
         if (displayArea != null)
         {
             var centeredX = (displayArea.WorkArea.Width - newWidth) / 2;
             var centeredY = (displayArea.WorkArea.Height - newHeight) / 2;
             AppWindow.Move(new Windows.Graphics.PointInt32(centeredX, centeredY));
         }
+    }
+
+    /// <summary>
+    /// 根据当前界面的实际深浅色，动态设置右上角最小化/最大化/关闭按钮的前景和悬浮色
+    /// </summary>
+    private void UpdateTitleBarTheme()
+    {
+        var titleBar = AppWindow.TitleBar;
+        if (titleBar == null) return;
+
+        // 背景全透明
+        titleBar.ButtonBackgroundColor = Colors.Transparent;
+        titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
+
+        // 判断当前内容实际呈现的是深色还是浅色
+        bool isDark = false;
+        if (Content is FrameworkElement fe)
+        {
+            isDark = fe.ActualTheme == ElementTheme.Dark
+                     || (fe.ActualTheme == ElementTheme.Default && Application.Current.RequestedTheme == ApplicationTheme.Dark);
+        }
+
+        // 浅色主题用黑色图标，深色主题用白色图标
+        var iconColor = isDark ? Colors.White : Colors.Black;
+
+        titleBar.ButtonForegroundColor = iconColor;
+        titleBar.ButtonHoverForegroundColor = iconColor;
+        titleBar.ButtonPressedForegroundColor = iconColor;
+
+        // 鼠标悬浮和点击时的背景微透微光
+        titleBar.ButtonHoverBackgroundColor = isDark
+       ? ColorHelper.FromArgb(25, 255, 255, 255)
+       : ColorHelper.FromArgb(25, 0, 0, 0);
+
+        titleBar.ButtonPressedBackgroundColor = isDark
+            ? ColorHelper.FromArgb(40, 255, 255, 255)
+            : ColorHelper.FromArgb(40, 0, 0, 0);
     }
 }

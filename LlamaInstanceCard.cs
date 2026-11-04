@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.UI;
@@ -9,13 +10,14 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
-using System.Net.Http;
-
 
 namespace MyMarkupApp;
 
 public class LlamaInstanceCard : UserControl
 {
+    private const int MaxInstanceLogLength = 100_000; // 单实例日志上限约 100KB，防止无限膨胀
+    private static readonly HttpClient SharedHttpClient = new() { Timeout = TimeSpan.FromSeconds(2) }; // 复用 HttpClient
+
     private readonly int _id;
     private readonly Func<string> _getExePathFunc;
     private readonly Action<LlamaInstanceCard, string> _logCallback;
@@ -71,11 +73,11 @@ public class LlamaInstanceCard : UserControl
         };
         _startStopBtn.Click += (s, e) => ToggleStartStop();
 
-        // 👈 View Log 按钮
+        // View Log 按钮
         var viewLogBtn = MainWindow.CreateIconButton(Symbol.Document, "View Log");
         viewLogBtn.Click += (s, e) => ViewLogRequested?.Invoke(this);
 
-        // 单色删除按钮
+        // 删除按钮
         var deleteBtn = MainWindow.CreateIconButton(Symbol.Delete, "Delete");
         deleteBtn.Click += (s, e) =>
         {
@@ -105,7 +107,6 @@ public class LlamaInstanceCard : UserControl
         ToolTipService.SetToolTip(editExtraBtn, "Edit Extra Arguments in dialog");
         editExtraBtn.Click += async (s, e) => await ShowExtraArgsDialogAsync();
 
-        // 为 -m 配置浏览按钮
         var browseModelBtn = new Button
         {
             Content = new SymbolIcon(Symbol.OpenFile),
@@ -114,7 +115,6 @@ public class LlamaInstanceCard : UserControl
         ToolTipService.SetToolTip(browseModelBtn, "Browse Model (.gguf)");
         browseModelBtn.Click += async (s, e) => await PickGgufFileAsync(_modelBox);
 
-        // 为 --mmproj 配置浏览按钮
         var browseMmprojBtn = new Button
         {
             Content = new SymbolIcon(Symbol.OpenFile),
@@ -122,6 +122,37 @@ public class LlamaInstanceCard : UserControl
         };
         ToolTipService.SetToolTip(browseMmprojBtn, "Browse Multimodal Projector (.gguf)");
         browseMmprojBtn.Click += async (s, e) => await PickGgufFileAsync(_mmprojBox);
+
+        // --- 头部 Grid 布局重构（明确定义列，不再依赖索引查找） ---
+        var headerTitlePanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 10,
+            Children =
+            {
+                new TextBlock { Text = $"Instance #{_id}", FontSize = 16, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
+                _statusBadge
+            }
+        };
+        Grid.SetColumn(headerTitlePanel, 0);
+
+        var headerActionPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            Children = { _startStopBtn, viewLogBtn, deleteBtn }
+        };
+        Grid.SetColumn(headerActionPanel, 1);
+
+        var headerGrid = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+                new ColumnDefinition { Width = GridLength.Auto }
+            },
+            Children = { headerTitlePanel, headerActionPanel }
+        };
 
         Content = new Border
         {
@@ -135,35 +166,8 @@ public class LlamaInstanceCard : UserControl
                 Spacing = 12,
                 Children =
                 {
-                    // 顶部头部：状态与操作按钮（Start / View Log / Delete）
-                    new Grid
-                    {
-                        ColumnDefinitions =
-                        {
-                            new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
-                            new ColumnDefinition { Width = GridLength.Auto }
-                        },
-                        Children =
-                        {
-                            new StackPanel
-                            {
-                                Orientation = Orientation.Horizontal,
-                                Spacing = 10,
-                                Children =
-                                {
-                                    new TextBlock { Text = $"Instance #{_id}", FontSize = 16, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
-                                    _statusBadge
-                                }
-                            },
-                            new StackPanel
-                            {
-                                Orientation = Orientation.Horizontal,
-                                Spacing = 8,
-                                Children = { _startStopBtn, viewLogBtn, deleteBtn }
-                            }
-                        }
-                    },
-                    // -m (Model) 路径配置 + 浏览按钮
+                    headerGrid,
+                    // -m 模型行
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -175,7 +179,7 @@ public class LlamaInstanceCard : UserControl
                             browseModelBtn
                         }
                     },
-                    // 端口、上下文参数
+                    // 端口、上下文、GPU层数行
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -190,7 +194,7 @@ public class LlamaInstanceCard : UserControl
                             _nglBox
                         }
                     },
-                    // --mmproj 路径配置 + 浏览按钮
+                    // --mmproj 多模态投影行
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -202,7 +206,7 @@ public class LlamaInstanceCard : UserControl
                             browseMmprojBtn
                         }
                     },
-                    // 附加额外参数
+                    // 附加额外参数行
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -212,25 +216,43 @@ public class LlamaInstanceCard : UserControl
                             new TextBlock { Text = "Extra Args:", Width = 85, VerticalAlignment = VerticalAlignment.Center },
                             _extraBox,
                             editExtraBtn
-
                         }
                     }
                 }
             }
         };
-
-        Grid.SetColumn((FrameworkElement)((Grid)((StackPanel)((Border)Content).Child).Children[0]).Children[1], 1);
     }
 
-    public string GetLogs() => _instanceLogBuffer.ToString();
+    public string GetLogs()
+    {
+        lock (_instanceLogBuffer)
+        {
+            return _instanceLogBuffer.ToString();
+        }
+    }
 
-    public void ClearLogs() => _instanceLogBuffer.Clear();
+    public void ClearLogs()
+    {
+        lock (_instanceLogBuffer)
+        {
+            _instanceLogBuffer.Clear();
+        }
+    }
 
     private void Log(string message)
     {
         string time = DateTime.Now.ToString("HH:mm:ss");
         string logLine = $"[{time}] {message}";
-        _instanceLogBuffer.AppendLine(logLine);
+
+        lock (_instanceLogBuffer)
+        {
+            _instanceLogBuffer.AppendLine(logLine);
+            if (_instanceLogBuffer.Length > MaxInstanceLogLength)
+            {
+                _instanceLogBuffer.Remove(0, _instanceLogBuffer.Length - (MaxInstanceLogLength - 10_000));
+            }
+        }
+
         _logCallback(this, message);
     }
 
@@ -260,8 +282,13 @@ public class LlamaInstanceCard : UserControl
             return;
         }
 
-        string args = $"--port {_portBox.Text} -c {_ctxBox.Text} -ngl {_nglBox.Text}";
-        if (!string.IsNullOrWhiteSpace(_modelBox.Text)) args += $" -m \"{_modelBox.Text.Trim()}\"";
+        if (string.IsNullOrWhiteSpace(_modelBox.Text))
+        {
+            Log("[ERROR] Model path (-m) cannot be empty!");
+            return;
+        }
+
+        string args = $"--port {_portBox.Text.Trim()} -c {_ctxBox.Text.Trim()} -ngl {_nglBox.Text.Trim()} -m \"{_modelBox.Text.Trim()}\"";
         if (!string.IsNullOrWhiteSpace(_mmprojBox.Text)) args += $" --mmproj \"{_mmprojBox.Text.Trim()}\"";
         if (!string.IsNullOrWhiteSpace(_extraBox.Text)) args += $" {_extraBox.Text.Trim()}";
 
@@ -280,7 +307,7 @@ public class LlamaInstanceCard : UserControl
             _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
             _process.OutputDataReceived += (s, e) => { if (e.Data != null) Log(e.Data); };
             _process.ErrorDataReceived += (s, e) => { if (e.Data != null) Log(e.Data); };
-            _process.Exited += (s, e) => DispatcherQueue.TryEnqueue(UpdateStoppedUi);
+            _process.Exited += (s, e) => DispatcherQueue?.TryEnqueue(UpdateStoppedUi);
 
             _process.Start();
             _process.BeginOutputReadLine();
@@ -289,7 +316,6 @@ public class LlamaInstanceCard : UserControl
             _statusBadge.Text = $"Running (PID: {_process.Id})";
             _statusBadge.Foreground = new SolidColorBrush(Colors.SeaGreen);
 
-            // 切换为 Stop 状态（单色图标 + 普通按钮样式）
             _startStopIcon.Symbol = Symbol.Stop;
             _startStopText.Text = "Stop";
             _startStopBtn.ClearValue(Button.StyleProperty);
@@ -298,7 +324,7 @@ public class LlamaInstanceCard : UserControl
         }
         catch (Exception ex)
         {
-            Log($"[ERROR] {ex.Message}");
+            Log($"[ERROR] Start failed: {ex.Message}");
             UpdateStoppedUi();
         }
     }
@@ -313,13 +339,11 @@ public class LlamaInstanceCard : UserControl
         _statusBadge.Text = "Loading Model...";
         _statusBadge.Foreground = new SolidColorBrush(Colors.DarkOrange);
 
-        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
         string url = $"http://127.0.0.1:{_portBox.Text.Trim()}/health";
         var startTime = DateTime.Now;
 
         while (DateTime.Now - startTime < timeout)
         {
-
             if (_process == null || _process.HasExited)
             {
                 Log("[ERROR] Server process exited unexpectedly during startup.");
@@ -328,7 +352,7 @@ public class LlamaInstanceCard : UserControl
 
             try
             {
-                var response = await httpClient.GetAsync(url);
+                var response = await SharedHttpClient.GetAsync(url);
                 if (response.IsSuccessStatusCode)
                 {
                     _statusBadge.Text = $"Running (PID: {_process.Id})";
@@ -339,7 +363,7 @@ public class LlamaInstanceCard : UserControl
             }
             catch
             {
-
+                // 等待服务监听端口准备就绪
             }
 
             await Task.Delay(1000);
@@ -380,7 +404,6 @@ public class LlamaInstanceCard : UserControl
         _statusBadge.Text = "Stopped";
         _statusBadge.Foreground = new SolidColorBrush(Colors.Gray);
 
-        // 恢复为 Start 状态（单色播放图标 + Accent 强调色）
         _startStopIcon.Symbol = Symbol.Play;
         _startStopText.Text = "Start";
         _startStopBtn.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
@@ -388,11 +411,11 @@ public class LlamaInstanceCard : UserControl
 
     private async Task ShowExtraArgsDialogAsync()
     {
-        // 如果已有参数，按空格或换行拆开，方便多行展示编辑
         string initialText = _extraBox.Text.Replace(" --", "\n--");
 
         var editBox = new TextBox
-        {   // 微软bug，acceptsreturn 必须在最前面。 see: https://github.com/microsoft/microsoft-ui-xaml/issues/10956
+        {
+            // 微软bug，AcceptsReturn 必须在最前面。see: https://github.com/microsoft/microsoft-ui-xaml/issues/10956
             AcceptsReturn = true,
             Text = initialText,
             TextWrapping = TextWrapping.Wrap,
@@ -428,15 +451,12 @@ public class LlamaInstanceCard : UserControl
         var result = await dialog.ShowAsync();
         if (result == ContentDialogResult.Primary)
         {
-            char[] separators = new char[] { '\r', '\n' };
+            char[] separators = { '\r', '\n' };
             string[] lines = editBox.Text.Split(separators, StringSplitOptions.RemoveEmptyEntries);
             _extraBox.Text = string.Join(" ", Array.ConvertAll(lines, l => l.Trim()));
         }
     }
 
-    /// <summary>
-    /// 导出当前卡片的配置数据
-    /// </summary>
     public InstanceConfig GetConfig()
     {
         return new InstanceConfig
@@ -451,9 +471,6 @@ public class LlamaInstanceCard : UserControl
         };
     }
 
-    /// <summary>
-    /// 将配置数据应用到当前卡片 UI
-    /// </summary>
     public void ApplyConfig(InstanceConfig config)
     {
         _modelBox.Text = config.ModelPath ?? string.Empty;
