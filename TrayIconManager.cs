@@ -16,10 +16,14 @@ public sealed class TrayIconManager : IDisposable
     private const int NIF_MESSAGE = 0x0001;
     private const int NIF_ICON = 0x0002;
     private const int NIF_TIP = 0x0004;
-    private const int NIM_MODIFY = 0x0001;
+    private const int NIF_INFO = 0x0010;
 
     private const int NIM_ADD = 0x0000;
+    private const int NIM_MODIFY = 0x0001;
     private const int NIM_DELETE = 0x0002;
+
+    private const int NIIF_INFO = 0x0001;
+    private const uint NIN_BALLOONUSERCLICK = 0x0405; // User clicked the notification banner
 
     private const uint MF_STRING = 0x0000;
     private const uint MF_SEPARATOR = 0x0800;
@@ -36,19 +40,16 @@ public sealed class TrayIconManager : IDisposable
 
     public event Action? RestoreRequested;
     public event Action? ExitRequested;
-    private const int NIF_INFO = 0x0010;
-    private const int NIIF_INFO = 0x0001;
-    private const uint NIN_BALLOONUSERCLICK = 0x0405; // 用户点击了通知气泡
 
     public TrayIconManager(nint hwnd, string tooltip)
     {
         _hwnd = hwnd;
         _subclassProc = WindowSubclassHandler;
 
-        // 挂载 Win32 窗口消息子类化，监听托盘通知
+        // Subclass the Win32 window procedure to listen for tray notifications
         SetWindowSubclass(_hwnd, _subclassProc, SubclassId, 0);
 
-        // 创建系统托盘图标
+        // Create the system tray icon
         CreateTrayIcon(tooltip);
     }
 
@@ -67,13 +68,14 @@ public sealed class TrayIconManager : IDisposable
 
         _isCreated = Shell_NotifyIcon(NIM_ADD, ref nid);
     }
+
     private nint WindowSubclassHandler(nint hWnd, uint uMsg, nint wParam, nint lParam, nuint uIdSubclass, nuint dwRefData)
     {
         if (uMsg == WM_TRAYICON)
         {
             uint mouseMsg = (uint)(lParam.ToInt64() & 0xFFFF);
 
-            // 左键点击、双击托盘图标，或者直接点击弹出的通知横幅：都还原主窗口
+            // Left-click, double-click, or clicking the notification banner restores the main window
             if (mouseMsg is WM_LBUTTONUP or WM_LBUTTONDBLCLK or NIN_BALLOONUSERCLICK)
             {
                 RestoreRequested?.Invoke();
@@ -88,16 +90,17 @@ public sealed class TrayIconManager : IDisposable
 
         return DefSubclassProc(hWnd, uMsg, wParam, lParam);
     }
+
     private void ShowContextMenu()
     {
         GetCursorPos(out POINT pt);
         nint hMenu = CreatePopupMenu();
 
-        AppendMenu(hMenu, MF_STRING, (nuint)CMD_RESTORE, "显示主窗口");
+        AppendMenu(hMenu, MF_STRING, (nuint)CMD_RESTORE, "Show Window");
         AppendMenu(hMenu, MF_SEPARATOR, 0, string.Empty);
-        AppendMenu(hMenu, MF_STRING, (nuint)CMD_EXIT, "退出程序");
+        AppendMenu(hMenu, MF_STRING, (nuint)CMD_EXIT, "Exit");
 
-        // Win32 要求在 TrackPopupMenu 之前将窗口置顶，否则点击外部菜单不会消失
+        // Win32 requires the window to be in the foreground before TrackPopupMenu, otherwise clicking outside will not dismiss the menu
         SetForegroundWindow(_hwnd);
         int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.X, pt.Y, 0, _hwnd, nint.Zero);
         PostMessage(_hwnd, 0, nint.Zero, nint.Zero);
@@ -115,7 +118,7 @@ public sealed class TrayIconManager : IDisposable
 
     private nint GetAppIcon()
     {
-        // 尝试从当前进程 Exe 提取图标，若失败则加载默认系统应用图标
+        // Attempt to extract the icon from the current process executable; fallback to default application icon
         nint hIcon = ExtractIcon(nint.Zero, Environment.ProcessPath ?? string.Empty, 0);
         if (hIcon == nint.Zero || hIcon == 1)
         {
@@ -125,7 +128,7 @@ public sealed class TrayIconManager : IDisposable
     }
 
     /// <summary>
-    /// 弹出系统原生托盘通知
+    /// Displays a native system tray notification banner.
     /// </summary>
     public void ShowNotification(string title, string message)
     {

@@ -18,13 +18,13 @@ namespace MyMarkupApp;
 
 public sealed class MainWindow : Window
 {
-    // 配置文件持久化路径（保存在进程同级目录下）
+    // Configuration file persistence path (saved in the same directory as the process)
     private static readonly string ConfigFilePath = Path.Combine(
         Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory,
         "config.json"
     );
 
-    private const int MaxGlobalLogLength = 150_000; // 全局日志缓冲最大保留字符（约 150KB），防止无限膨胀爆内存
+    private const int MaxGlobalLogLength = 150_000; // Maximum global log buffer characters (~150KB) to prevent unbounded memory growth
 
     private readonly nint _hwnd;
     private readonly StackPanel _cardsContainer;
@@ -35,13 +35,13 @@ public sealed class MainWindow : Window
 
     private readonly List<LlamaInstanceCard> _cardList = new();
     private readonly StringBuilder _allLogsBuffer = new();
-    private readonly object _logLock = new(); // 保证多进程并发吐日志时的线程安全锁
+    private readonly object _logLock = new(); // Thread safety lock for concurrent logging across multiple processes
 
     private LlamaInstanceCard? _selectedLogCard = null;
     private int _cardCounter = 1;
     private ScrollViewer? _logInternalScrollViewer;
 
-    // 定时批量刷新机制（100ms 节流）：彻底解耦进程高频日志与 UI 渲染，杜绝界面卡死
+    // Periodic batch refresh (100ms throttle): completely decouples high-frequency logs from UI rendering to prevent UI freezes
     private readonly DispatcherTimer _logFlushTimer;
     private bool _isLogDirty = false;
 
@@ -55,7 +55,7 @@ public sealed class MainWindow : Window
     private const int SW_RESTORE = 9;
 
     /// <summary>
-    /// 递归遍历视觉树，获取 TextBox 内部自带的 ScrollViewer
+    /// Recursively traverses the visual tree to find the internal ScrollViewer of a TextBox.
     /// </summary>
     private static ScrollViewer? FindScrollViewer(DependencyObject root)
     {
@@ -77,7 +77,7 @@ public sealed class MainWindow : Window
         SetupWindowStyle();
 
         // =========================================================================
-        // 1. 顶部操作栏 (Server Exe 路径配置与全局启停)
+        // 1. Top operation bar (Server executable path and global controls)
         // =========================================================================
         _exePathBox = new TextBox
         {
@@ -100,7 +100,7 @@ public sealed class MainWindow : Window
             startAllBtn.IsEnabled = false;
             try
             {
-                // 使用 .ToList() 创建快照，防止遍历中修改卡片列表导致迭代器崩溃
+                // Create a snapshot with .ToList() to prevent collection modification during iteration
                 foreach (var card in _cardList.ToList())
                 {
                     if (card.IsRunning) continue;
@@ -144,7 +144,7 @@ public sealed class MainWindow : Window
         };
 
         // =========================================================================
-        // 2. 中间卡片动态滚动区
+        // 2. Middle dynamic card scroll area
         // =========================================================================
         _cardsContainer = new StackPanel { Spacing = 16 };
         _cardsScrollViewer = new ScrollViewer
@@ -154,7 +154,7 @@ public sealed class MainWindow : Window
         };
 
         // =========================================================================
-        // 3. 底部实时日志面板（使用清晰明确的 Grid 布局，杜绝层级套娃）
+        // 3. Bottom live output console panel (explicit Grid layout)
         // =========================================================================
         _logTitleText = new TextBlock
         {
@@ -203,7 +203,7 @@ public sealed class MainWindow : Window
             _logConsole.Text = string.Empty;
         };
 
-        // 日志区头部栏 (左侧标题 + 右侧操作按钮)
+        // Console header bar (title on the left + action buttons on the right)
         var logHeaderGrid = new Grid
         {
             ColumnDefinitions =
@@ -224,7 +224,7 @@ public sealed class MainWindow : Window
         Grid.SetColumn(logButtonsPanel, 1);
         logHeaderGrid.Children.Add(logButtonsPanel);
 
-        // 日志区纵向布局 (第 0 行头部，第 1 行输出终端文本框)
+        // Console vertical layout (Row 0: header, Row 1: console text box)
         var logContentGrid = new Grid
         {
             RowDefinitions =
@@ -250,7 +250,7 @@ public sealed class MainWindow : Window
         };
 
         // =========================================================================
-        // 4. 主窗口根布局拼接
+        // 4. Root grid layout assembly
         // =========================================================================
         var rootGrid = new Grid
         {
@@ -275,7 +275,7 @@ public sealed class MainWindow : Window
         UpdateTitleBarTheme();
 
         // =========================================================================
-        // 5. 启动日志节流定时器 (100ms 刷新一次界面，消除高频 IO 带来的卡顿)
+        // 5. Start log throttling timer (flushes UI every 100ms to eliminate stutter)
         // =========================================================================
         _logFlushTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         _logFlushTimer.Tick += (s, e) =>
@@ -288,6 +288,7 @@ public sealed class MainWindow : Window
         };
         _logFlushTimer.Start();
 
+        // Intercept close [X] button: minimize to tray unless a real exit was requested
         AppWindow.Closing += (sender, args) =>
         {
             if (!_isRealExit)
@@ -295,20 +296,20 @@ public sealed class MainWindow : Window
                 args.Cancel = true;
                 AppWindow.Hide();
 
-                // 弹出系统托盘通知
+                // Show system tray notification
                 _trayIconManager?.ShowNotification(
-                    "llama-server 管理器",
-                    "程序已最小化到系统托盘，后台模型服务仍在运行中。\n点击此通知或双击托盘图标可重新打开。"
+                    "llama-server Manager",
+                    "The application has been minimized to the system tray. Background model services are still running.\nClick this notification or double-click the tray icon to restore."
                 );
             }
         };
 
-        // 2. 初始化托盘图标
+        // 2. Initialize system tray icon
         _trayIconManager = new TrayIconManager(_hwnd, "llama-server Multi-Instance Manager");
         _trayIconManager.RestoreRequested += () => DispatcherQueue.TryEnqueue(BringToFront);
         _trayIconManager.ExitRequested += () => DispatcherQueue.TryEnqueue(ExitApplication);
 
-        // 3. 真正退出时清理托盘图标
+        // 3. Clean up tray icon on real application exit
         Closed += (s, e) =>
         {
             _trayIconManager?.Dispose();
@@ -318,12 +319,12 @@ public sealed class MainWindow : Window
             foreach (var card in _cardList) card.Stop();
         };
 
-        // 初始化读取配置
+        // Initialize and load saved configuration
         LoadConfig();
     }
 
     /// <summary>
-    /// 从托盘还原并激活主窗口
+    /// Restores and activates the main window from the system tray.
     /// </summary>
     private void BringToFront()
     {
@@ -333,7 +334,7 @@ public sealed class MainWindow : Window
     }
 
     /// <summary>
-    /// 托盘右键菜单真正退出程序
+    /// Exits the application completely from the tray context menu.
     /// </summary>
     private void ExitApplication()
     {
@@ -440,7 +441,7 @@ public sealed class MainWindow : Window
         _cardsScrollViewer.ChangeView(null, _cardsScrollViewer.ScrollableHeight, null);
     }
 
-    #region 本地 JSON 持久化
+    #region Local JSON Persistence
 
     private void SaveConfig()
     {
@@ -491,13 +492,13 @@ public sealed class MainWindow : Window
             AppendSystemLog($"[WARN] Failed to load config.json: {ex.Message}");
         }
 
-        // 若无配置文件，默认新增一个空实例卡片
+        // If no configuration file exists, add a default empty instance card
         AddCard();
     }
 
     #endregion
 
-    #region 高性能日志记录与视图刷新
+    #region High-Performance Logging and View Refresh
 
     private void AppendSystemLog(string message)
     {
@@ -524,7 +525,7 @@ public sealed class MainWindow : Window
             TrimBufferIfNeeded(_allLogsBuffer);
         }
 
-        // 仅在当前处于“全局日志”或“正在观察该实例”时标记界面需要刷新
+        // Mark UI as dirty only if viewing "All Logs" or currently viewing this specific instance
         if (_selectedLogCard == null || _selectedLogCard == card)
         {
             _isLogDirty = true;
@@ -576,7 +577,7 @@ public sealed class MainWindow : Window
         SystemBackdrop = new MicaBackdrop();
         ExtendsContentIntoTitleBar = true;
 
-        // 统一更新标题栏按钮颜色
+        // Update title bar button theme
         UpdateTitleBarTheme();
 
         int newWidth = 1350;
@@ -593,18 +594,18 @@ public sealed class MainWindow : Window
     }
 
     /// <summary>
-    /// 根据当前界面的实际深浅色，动态设置右上角最小化/最大化/关闭按钮的前景和悬浮色
+    /// Dynamically updates title bar button foreground and hover colors based on current app theme.
     /// </summary>
     private void UpdateTitleBarTheme()
     {
         var titleBar = AppWindow.TitleBar;
         if (titleBar == null) return;
 
-        // 背景全透明
+        // Transparent background
         titleBar.ButtonBackgroundColor = Colors.Transparent;
         titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
 
-        // 判断当前内容实际呈现的是深色还是浅色
+        // Check whether the active content theme is dark or light
         bool isDark = false;
         if (Content is FrameworkElement fe)
         {
@@ -612,17 +613,17 @@ public sealed class MainWindow : Window
                      || (fe.ActualTheme == ElementTheme.Default && Application.Current.RequestedTheme == ApplicationTheme.Dark);
         }
 
-        // 浅色主题用黑色图标，深色主题用白色图标
+        // Use black icons for light theme, white icons for dark theme
         var iconColor = isDark ? Colors.White : Colors.Black;
 
         titleBar.ButtonForegroundColor = iconColor;
         titleBar.ButtonHoverForegroundColor = iconColor;
         titleBar.ButtonPressedForegroundColor = iconColor;
 
-        // 鼠标悬浮和点击时的背景微透微光
+        // Subtle translucent highlight on hover and press
         titleBar.ButtonHoverBackgroundColor = isDark
-       ? ColorHelper.FromArgb(25, 255, 255, 255)
-       : ColorHelper.FromArgb(25, 0, 0, 0);
+            ? ColorHelper.FromArgb(25, 255, 255, 255)
+            : ColorHelper.FromArgb(25, 0, 0, 0);
 
         titleBar.ButtonPressedBackgroundColor = isDark
             ? ColorHelper.FromArgb(40, 255, 255, 255)

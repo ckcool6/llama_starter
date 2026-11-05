@@ -16,7 +16,6 @@ public class App : Application, IXamlMetadataProvider
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        // 加载默认控件样式
         Resources.MergedDictionaries.Add(new XamlControlsResources());
 
         _window = new MainWindow();

@@ -15,8 +15,8 @@ namespace MyMarkupApp;
 
 public class LlamaInstanceCard : UserControl
 {
-    private const int MaxInstanceLogLength = 100_000; // 单实例日志上限约 100KB，防止无限膨胀
-    private static readonly HttpClient SharedHttpClient = new() { Timeout = TimeSpan.FromSeconds(2) }; // 复用 HttpClient
+    private const int MaxInstanceLogLength = 100_000; // Limit instance log to ~100KB to prevent memory exhaustion
+    private static readonly HttpClient SharedHttpClient = new() { Timeout = TimeSpan.FromSeconds(2) }; // Shared HttpClient instance
 
     private readonly int _id;
     private readonly Func<string> _getExePathFunc;
@@ -57,7 +57,7 @@ public class LlamaInstanceCard : UserControl
             FontSize = 12
         };
 
-        // 单色启停图标与按钮
+        // Start / Stop icon and button
         _startStopIcon = new SymbolIcon(Symbol.Play);
         _startStopText = new TextBlock { Text = "Start", VerticalAlignment = VerticalAlignment.Center };
 
@@ -73,11 +73,11 @@ public class LlamaInstanceCard : UserControl
         };
         _startStopBtn.Click += (s, e) => ToggleStartStop();
 
-        // View Log 按钮
+        // View Log button
         var viewLogBtn = MainWindow.CreateIconButton(Symbol.Document, "View Log");
         viewLogBtn.Click += (s, e) => ViewLogRequested?.Invoke(this);
 
-        // 删除按钮
+        // Delete button
         var deleteBtn = MainWindow.CreateIconButton(Symbol.Delete, "Delete");
         deleteBtn.Click += (s, e) =>
         {
@@ -123,7 +123,7 @@ public class LlamaInstanceCard : UserControl
         ToolTipService.SetToolTip(browseMmprojBtn, "Browse Multimodal Projector (.gguf)");
         browseMmprojBtn.Click += async (s, e) => await PickGgufFileAsync(_mmprojBox);
 
-        // --- 头部 Grid 布局重构（明确定义列，不再依赖索引查找） ---
+        // --- Header Grid layout with explicit column definitions ---
         var headerTitlePanel = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -167,7 +167,7 @@ public class LlamaInstanceCard : UserControl
                 Children =
                 {
                     headerGrid,
-                    // -m 模型行
+                    // -m Model row
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -179,7 +179,7 @@ public class LlamaInstanceCard : UserControl
                             browseModelBtn
                         }
                     },
-                    // 端口、上下文、GPU层数行
+                    // Port, context size, and GPU offload rows
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -194,7 +194,7 @@ public class LlamaInstanceCard : UserControl
                             _nglBox
                         }
                     },
-                    // --mmproj 多模态投影行
+                    // --mmproj Multimodal projector row
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -206,7 +206,7 @@ public class LlamaInstanceCard : UserControl
                             browseMmprojBtn
                         }
                     },
-                    // 附加额外参数行
+                    // Extra CLI arguments row
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -363,7 +363,7 @@ public class LlamaInstanceCard : UserControl
             }
             catch
             {
-                // 等待服务监听端口准备就绪
+                // Wait for the server endpoint to be ready
             }
 
             await Task.Delay(1000);
@@ -415,7 +415,7 @@ public class LlamaInstanceCard : UserControl
 
         var editBox = new TextBox
         {
-            // 微软bug，AcceptsReturn 必须在最前面。see: https://github.com/microsoft/microsoft-ui-xaml/issues/10956
+            // WinUI bug: AcceptsReturn must be set first. See: https://github.com/microsoft/microsoft-ui-xaml/issues/10956
             AcceptsReturn = true,
             Text = initialText,
             TextWrapping = TextWrapping.Wrap,
