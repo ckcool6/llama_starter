@@ -15,8 +15,8 @@ namespace llamaStarter;
 
 public class LlamaInstanceCard : UserControl
 {
-    private const int MaxInstanceLogLength = 100_000; // Limit instance log to ~100KB to prevent memory exhaustion
-    private static readonly HttpClient SharedHttpClient = new() { Timeout = TimeSpan.FromSeconds(2) }; // Shared HttpClient instance
+    private const int MaxInstanceLogLength = 100_000;
+    private static readonly HttpClient SharedHttpClient = new() { Timeout = TimeSpan.FromSeconds(2) };
 
     private readonly int _id;
     private readonly Func<string> _getExePathFunc;
@@ -36,6 +36,31 @@ public class LlamaInstanceCard : UserControl
     private readonly TextBox _nglBox;
     private readonly TextBox _mmprojBox;
     private readonly TextBox _extraBox;
+
+    // --- 硬件监控相关控件与计时变量 ---
+    private readonly ProgressBar _cpuBar = new() { Maximum = 100, Height = 6 };
+    private readonly TextBlock _cpuText = new() { Text = "0%", FontSize = 11, Width = 45, TextAlignment = TextAlignment.Right };
+
+    private readonly ProgressBar _ramBar = new() { Maximum = 100, Height = 6 };
+    private readonly TextBlock _ramText = new() { Text = "0 MB", FontSize = 11, Width = 55, TextAlignment = TextAlignment.Right };
+
+    private readonly ProgressBar _gpuBar = new() { Maximum = 100, Height = 6 };
+    private readonly TextBlock _gpuText = new() { Text = "0%", FontSize = 11, Width = 45, TextAlignment = TextAlignment.Right };
+
+    private readonly ProgressBar _vramBar = new() { Maximum = 100, Height = 6 };
+    private readonly TextBlock _vramText = new() { Text = "0 MB", FontSize = 11, Width = 55, TextAlignment = TextAlignment.Right };
+
+    private readonly TextBlock _freeMemoryText = new()
+    {
+        Text = "Free: RAM - | VRAM -",
+        FontSize = 10,
+        Foreground = new SolidColorBrush(Colors.Gray),
+        HorizontalAlignment = HorizontalAlignment.Center
+    };
+
+    private readonly DispatcherTimer _metricsTimer;
+    private TimeSpan _prevCpuTime = TimeSpan.Zero;
+    private DateTime _prevSampleTime = DateTime.MinValue;
 
     public int Id => _id;
     public bool IsRunning => _process != null && !_process.HasExited;
@@ -57,7 +82,6 @@ public class LlamaInstanceCard : UserControl
             FontSize = 12
         };
 
-        // Start / Stop icon and button
         _startStopIcon = new SymbolIcon(Symbol.Play);
         _startStopText = new TextBlock { Text = "Start", VerticalAlignment = VerticalAlignment.Center };
 
@@ -73,11 +97,9 @@ public class LlamaInstanceCard : UserControl
         };
         _startStopBtn.Click += (s, e) => ToggleStartStop();
 
-        // View Log button
         var viewLogBtn = MainWindow.CreateIconButton(Symbol.Document, "View Log");
         viewLogBtn.Click += (s, e) => ViewLogRequested?.Invoke(this);
 
-        // Delete button
         var deleteBtn = MainWindow.CreateIconButton(Symbol.Delete, "Delete");
         deleteBtn.Click += (s, e) =>
         {
@@ -99,31 +121,19 @@ public class LlamaInstanceCard : UserControl
         };
         _extraBox.Tapped += async (s, e) => await ShowExtraArgsDialogAsync();
 
-        var editExtraBtn = new Button
-        {
-            Content = new SymbolIcon(Symbol.Edit),
-            VerticalAlignment = VerticalAlignment.Center
-        };
+        var editExtraBtn = new Button { Content = new SymbolIcon(Symbol.Edit), VerticalAlignment = VerticalAlignment.Center };
         ToolTipService.SetToolTip(editExtraBtn, "Edit Extra Arguments in dialog");
         editExtraBtn.Click += async (s, e) => await ShowExtraArgsDialogAsync();
 
-        var browseModelBtn = new Button
-        {
-            Content = new SymbolIcon(Symbol.OpenFile),
-            VerticalAlignment = VerticalAlignment.Center
-        };
+        var browseModelBtn = new Button { Content = new SymbolIcon(Symbol.OpenFile), VerticalAlignment = VerticalAlignment.Center };
         ToolTipService.SetToolTip(browseModelBtn, "Browse Model (.gguf)");
         browseModelBtn.Click += async (s, e) => await PickGgufFileAsync(_modelBox);
 
-        var browseMmprojBtn = new Button
-        {
-            Content = new SymbolIcon(Symbol.OpenFile),
-            VerticalAlignment = VerticalAlignment.Center
-        };
+        var browseMmprojBtn = new Button { Content = new SymbolIcon(Symbol.OpenFile), VerticalAlignment = VerticalAlignment.Center };
         ToolTipService.SetToolTip(browseMmprojBtn, "Browse Multimodal Projector (.gguf)");
         browseMmprojBtn.Click += async (s, e) => await PickGgufFileAsync(_mmprojBox);
 
-        // --- Header Grid layout with explicit column definitions ---
+        // --- 头部 Grid 布局 ---
         var headerTitlePanel = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -154,6 +164,84 @@ public class LlamaInstanceCard : UserControl
             Children = { headerTitlePanel, headerActionPanel }
         };
 
+        // --- 左侧：参数输入区 ---
+        var leftFormPanel = new StackPanel
+        {
+            Spacing = 12,
+            Children =
+            {
+                headerGrid,
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 10,
+                    Children = { new TextBlock { Text = "-m (Model):", Width = 85, VerticalAlignment = VerticalAlignment.Center }, _modelBox, browseModelBtn }
+                },
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 12,
+                    Children =
+                    {
+                        new TextBlock { Text = "Port:", VerticalAlignment = VerticalAlignment.Center }, _portBox,
+                        new TextBlock { Text = "-c:", VerticalAlignment = VerticalAlignment.Center }, _ctxBox,
+                        new TextBlock { Text = "-ngl:", VerticalAlignment = VerticalAlignment.Center }, _nglBox
+                    }
+                },
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 10,
+                    Children = { new TextBlock { Text = "--mmproj:", Width = 85, VerticalAlignment = VerticalAlignment.Center }, _mmprojBox, browseMmprojBtn }
+                },
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 10,
+                    Children = { new TextBlock { Text = "Extra Args:", Width = 85, VerticalAlignment = VerticalAlignment.Center }, _extraBox, editExtraBtn }
+                }
+            }
+        };
+        Grid.SetColumn(leftFormPanel, 0);
+
+        // --- 右侧：卡片中的仪表盘子卡片 (Hardware Monitor) ---
+        var metricsPanel = new Border
+        {
+            Width = 240,
+            Margin = new Thickness(16, 0, 0, 0),
+            Padding = new Thickness(14),
+            CornerRadius = new CornerRadius(8),
+            Background = (Brush)Application.Current.Resources["CardBackgroundFillColorSecondaryBrush"],
+            BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
+            BorderThickness = new Thickness(1),
+            Child = new StackPanel
+            {
+                Spacing = 8,
+                VerticalAlignment = VerticalAlignment.Center,
+                Children =
+                {
+                    new TextBlock { Text = "Resource Usage", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, FontSize = 12 },
+                    CreateMetricRow("CPU", _cpuBar, _cpuText),
+                    CreateMetricRow("RAM", _ramBar, _ramText),
+                    CreateMetricRow("GPU", _gpuBar, _gpuText),
+                    CreateMetricRow("VRAM", _vramBar, _vramText),
+                    _freeMemoryText
+                }
+            }
+        };
+        Grid.SetColumn(metricsPanel, 1);
+
+        // 主卡片采用左右两列 Grid 拼接
+        var mainContentGrid = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+                new ColumnDefinition { Width = GridLength.Auto }
+            },
+            Children = { leftFormPanel, metricsPanel }
+        };
+
         Content = new Border
         {
             Padding = new Thickness(20),
@@ -161,82 +249,95 @@ public class LlamaInstanceCard : UserControl
             Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
             BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
             BorderThickness = new Thickness(1),
-            Child = new StackPanel
+            Child = mainContentGrid
+        };
+
+        // 硬件监控定时器（每秒采样一次）
+        _metricsTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _metricsTimer.Tick += (s, e) => UpdateMetrics();
+    }
+
+    private static Grid CreateMetricRow(string label, ProgressBar bar, TextBlock valueText)
+    {
+        var grid = new Grid
+        {
+            ColumnDefinitions =
             {
-                Spacing = 12,
-                Children =
-                {
-                    headerGrid,
-                    // -m Model row
-                    new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal,
-                        Spacing = 10,
-                        Children =
-                        {
-                            new TextBlock { Text = "-m (Model):", Width = 85, VerticalAlignment = VerticalAlignment.Center },
-                            _modelBox,
-                            browseModelBtn
-                        }
-                    },
-                    // Port, context size, and GPU offload rows
-                    new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal,
-                        Spacing = 12,
-                        Children =
-                        {
-                            new TextBlock { Text = "Port:", VerticalAlignment = VerticalAlignment.Center },
-                            _portBox,
-                            new TextBlock { Text = "-c:", VerticalAlignment = VerticalAlignment.Center },
-                            _ctxBox,
-                            new TextBlock { Text = "-ngl:", VerticalAlignment = VerticalAlignment.Center },
-                            _nglBox
-                        }
-                    },
-                    // --mmproj Multimodal projector row
-                    new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal,
-                        Spacing = 10,
-                        Children =
-                        {
-                            new TextBlock { Text = "--mmproj:", Width = 85, VerticalAlignment = VerticalAlignment.Center },
-                            _mmprojBox,
-                            browseMmprojBtn
-                        }
-                    },
-                    // Extra CLI arguments row
-                    new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal,
-                        Spacing = 10,
-                        Children =
-                        {
-                            new TextBlock { Text = "Extra Args:", Width = 85, VerticalAlignment = VerticalAlignment.Center },
-                            _extraBox,
-                            editExtraBtn
-                        }
-                    }
-                }
+                new ColumnDefinition { Width = new GridLength(40) },
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+                new ColumnDefinition { Width = GridLength.Auto }
             }
         };
+
+        var labelBlock = new TextBlock { Text = label, FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
+        bar.VerticalAlignment = VerticalAlignment.Center;
+        bar.Margin = new Thickness(4, 0, 6, 0);
+
+        Grid.SetColumn(labelBlock, 0);
+        Grid.SetColumn(bar, 1);
+        Grid.SetColumn(valueText, 2);
+
+        grid.Children.Add(labelBlock);
+        grid.Children.Add(bar);
+        grid.Children.Add(valueText);
+        return grid;
+    }
+
+    private void UpdateMetrics()
+    {
+        if (!IsRunning)
+        {
+            ResetMetricsUi();
+            return;
+        }
+
+        var m = HardwareMonitor.Collect(_process, ref _prevCpuTime, ref _prevSampleTime);
+
+        // 更新 CPU
+        _cpuBar.Value = m.CpuPercent;
+        _cpuText.Text = $"{m.CpuPercent:F0}%";
+
+        // 更新 RAM (百分比根据整机总内存计算)
+        double ramPercent = m.SystemRamTotalMb > 0 ? (m.RamUsedMb / m.SystemRamTotalMb) * 100 : 0;
+        _ramBar.Value = Math.Clamp(ramPercent, 0, 100);
+        _ramText.Text = m.RamUsedMb >= 1024 ? $"{m.RamUsedMb / 1024.0:F1} GB" : $"{m.RamUsedMb:F0} MB";
+
+        // 更新 GPU
+        _gpuBar.Value = m.GpuPercent;
+        _gpuText.Text = $"{m.GpuPercent:F0}%";
+
+        // 更新 VRAM
+        double vramPercent = m.SystemVramTotalMb > 0 ? (m.VramUsedMb / m.SystemVramTotalMb) * 100 : 0;
+        _vramBar.Value = Math.Clamp(vramPercent, 0, 100);
+        _vramText.Text = m.VramUsedMb >= 1024 ? $"{m.VramUsedMb / 1024.0:F1} GB" : $"{m.VramUsedMb:F0} MB";
+
+        // 底部全局剩余内存与显存展示
+        string freeRamStr = m.SystemRamFreeMb >= 1024 ? $"{m.SystemRamFreeMb / 1024.0:F1}G" : $"{m.SystemRamFreeMb:F0}M";
+        string freeVramStr = m.SystemVramFreeMb >= 1024 ? $"{m.SystemVramFreeMb / 1024.0:F1}G" : $"{m.SystemVramFreeMb:F0}M";
+        _freeMemoryText.Text = $"Free: RAM {freeRamStr} | VRAM {freeVramStr}";
+    }
+
+    private void ResetMetricsUi()
+    {
+        _cpuBar.Value = 0;
+        _cpuText.Text = "0%";
+        _ramBar.Value = 0;
+        _ramText.Text = "0 MB";
+        _gpuBar.Value = 0;
+        _gpuText.Text = "0%";
+        _vramBar.Value = 0;
+        _vramText.Text = "0 MB";
+        _freeMemoryText.Text = "Free: RAM - | VRAM -";
     }
 
     public string GetLogs()
     {
-        lock (_instanceLogBuffer)
-        {
-            return _instanceLogBuffer.ToString();
-        }
+        lock (_instanceLogBuffer) return _instanceLogBuffer.ToString();
     }
 
     public void ClearLogs()
     {
-        lock (_instanceLogBuffer)
-        {
-            _instanceLogBuffer.Clear();
-        }
+        lock (_instanceLogBuffer) _instanceLogBuffer.Clear();
     }
 
     private void Log(string message)
@@ -265,10 +366,7 @@ public class LlamaInstanceCard : UserControl
         InitializeWithWindow.Initialize(picker, _windowHandle);
 
         var file = await picker.PickSingleFileAsync();
-        if (file != null)
-        {
-            targetBox.Text = file.Path;
-        }
+        if (file != null) targetBox.Text = file.Path;
     }
 
     public void Start()
@@ -309,6 +407,9 @@ public class LlamaInstanceCard : UserControl
             _process.ErrorDataReceived += (s, e) => { if (e.Data != null) Log(e.Data); };
             _process.Exited += (s, e) => DispatcherQueue?.TryEnqueue(UpdateStoppedUi);
 
+            _prevCpuTime = TimeSpan.Zero;
+            _prevSampleTime = DateTime.MinValue;
+
             _process.Start();
             _process.BeginOutputReadLine();
             _process.BeginErrorReadLine();
@@ -319,6 +420,9 @@ public class LlamaInstanceCard : UserControl
             _startStopIcon.Symbol = Symbol.Stop;
             _startStopText.Text = "Stop";
             _startStopBtn.ClearValue(Button.StyleProperty);
+
+            // 启动硬件监控定时器
+            _metricsTimer.Start();
 
             Log($"[STARTED] Args: {args}");
         }
@@ -361,10 +465,7 @@ public class LlamaInstanceCard : UserControl
                     return true;
                 }
             }
-            catch
-            {
-                // Wait for the server endpoint to be ready
-            }
+            catch { }
 
             await Task.Delay(1000);
         }
@@ -378,6 +479,7 @@ public class LlamaInstanceCard : UserControl
         if (!IsRunning) return;
         try
         {
+            _metricsTimer.Stop();
             _process?.Kill(entireProcessTree: true);
             _process?.Dispose();
             _process = null;
@@ -401,6 +503,9 @@ public class LlamaInstanceCard : UserControl
 
     private void UpdateStoppedUi()
     {
+        _metricsTimer.Stop();
+        ResetMetricsUi();
+
         _statusBadge.Text = "Stopped";
         _statusBadge.Foreground = new SolidColorBrush(Colors.Gray);
 
