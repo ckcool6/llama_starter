@@ -133,35 +133,31 @@ public class LlamaInstanceCard : UserControl
         ToolTipService.SetToolTip(browseMmprojBtn, "Browse Multimodal Projector (.gguf)");
         browseMmprojBtn.Click += async (s, e) => await PickGgufFileAsync(_mmprojBox);
 
-        // --- 头部 Grid 布局 ---
-        var headerTitlePanel = new StackPanel
+        // --- 头部操作栏 ---
+        var headerPanel = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 10,
+            Spacing = 12,
+            VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
-                new TextBlock { Text = $"Instance #{_id}", FontSize = 16, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
-                _statusBadge
+                new TextBlock
+                {
+                    Text = $"Instance #{_id}",
+                    FontSize = 16,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    VerticalAlignment = VerticalAlignment.Center
+                },
+                _statusBadge,
+                // 操作按钮直接跟在状态标签后，左对齐
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 8,
+                    Margin = new Thickness(16, 0, 0, 0),
+                    Children = { _startStopBtn, viewLogBtn, deleteBtn }
+                }
             }
-        };
-        Grid.SetColumn(headerTitlePanel, 0);
-
-        var headerActionPanel = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 8,
-            Children = { _startStopBtn, viewLogBtn, deleteBtn }
-        };
-        Grid.SetColumn(headerActionPanel, 1);
-
-        var headerGrid = new Grid
-        {
-            ColumnDefinitions =
-            {
-                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
-                new ColumnDefinition { Width = GridLength.Auto }
-            },
-            Children = { headerTitlePanel, headerActionPanel }
         };
 
         // --- 左侧：参数输入区 ---
@@ -170,7 +166,7 @@ public class LlamaInstanceCard : UserControl
             Spacing = 12,
             Children =
             {
-                headerGrid,
+                headerPanel,
                 new StackPanel
                 {
                     Orientation = Orientation.Horizontal,
