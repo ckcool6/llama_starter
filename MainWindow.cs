@@ -14,7 +14,7 @@ using Microsoft.UI.Xaml.Media;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
 
-namespace MyMarkupApp;
+namespace llamaStarter;
 
 public sealed class MainWindow : Window
 {

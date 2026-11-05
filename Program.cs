@@ -3,7 +3,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using WinRT;
 
-namespace MyMarkupApp;
+namespace llamaStarter;
 
 public static class Program
 {

@@ -10,14 +10,14 @@
   IgnorableNamespaces="uap uap10 rescap systemai">
 
   <Identity
-    Name="BD3395F3-B617-4D87-B65D-74A257493698"
+    Name="llamaStarter"
     Publisher="CN=AppPublisher"
     Version="1.0.0.0" />
 
   <mp:PhoneIdentity PhoneProductId="BD3395F3-B617-4D87-B65D-74A257493698" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 
   <Properties>
-    <DisplayName>MyMarkupApp</DisplayName>
+    <DisplayName>llamaStarter</DisplayName>
     <PublisherDisplayName>AppPublisher</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
     <uap10:PackageIntegrity>
@@ -39,8 +39,8 @@
       Executable="$targetnametoken$.exe"
       EntryPoint="$targetentrypoint$">
       <uap:VisualElements
-        DisplayName="MyMarkupApp"
-        Description="MyMarkupApp"
+        DisplayName="llamaStarter"
+        Description="llamaStarter"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">

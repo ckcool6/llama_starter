@@ -3,7 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.XamlTypeInfo;
 
-namespace MyMarkupApp;
+namespace llamaStarter;
 
 public class App : Application, IXamlMetadataProvider
 {

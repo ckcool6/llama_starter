@@ -2,7 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-namespace MyMarkupApp;
+namespace llamaStarter;
 
 public sealed class TrayIconManager : IDisposable
 {

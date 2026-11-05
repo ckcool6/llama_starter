@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace MyMarkupApp;
+namespace llamaStarter;
 
 public class AppConfig
 {
