@@ -59,7 +59,7 @@ public static class HardwareMonitor
             catch { }
         }
 
-        // 2. 获取整机物理内存 RAM
+        // 2. 获取整机物理内存 RAM (全局剩余)
         double sysRamTotalMb = 0;
         double sysRamFreeMb = 0;
         var memStatus = new MEMORYSTATUSEX { dwLength = (uint)Marshal.SizeOf<MEMORYSTATUSEX>() };
@@ -69,7 +69,7 @@ public static class HardwareMonitor
             sysRamFreeMb = memStatus.ullAvailPhys / (1024.0 * 1024.0);
         }
 
-        // 3. 读取当前 PID 的 GPU 与 显存 VRAM (通过持久化 Tracker 连续采样)
+        // 3. 读取当前 PID 的 GPU 与 显存 VRAM
         double gpuPercent = 0;
         double vramUsedMb = 0;
 
@@ -107,8 +107,10 @@ public static class HardwareMonitor
             }
         }
 
+        // 4. 整机全局总显存与全局剩余显存 (所有卡片统一)
         double sysVramTotalMb = _cachedTotalVramMb;
-        double sysVramFreeMb = Math.Max(0, sysVramTotalMb - vramUsedMb);
+        double globalUsedVramMb = QueryGlobalUsedVram();
+        double sysVramFreeMb = Math.Max(0, sysVramTotalMb - globalUsedVramMb);
 
         return new ProcessMetrics(
             cpuPercent,
@@ -123,8 +125,63 @@ public static class HardwareMonitor
     }
 
     /// <summary>
-    /// 每个进程专用的 GPU/VRAM 连续采样跟踪器
+    /// 读取 Windows 全局显卡适配器当前被吃掉的总显存（整机所有进程占用总和）
     /// </summary>
+    private static double QueryGlobalUsedVram()
+    {
+        double usedBytes = 0;
+        if (PdhOpenQuery(nint.Zero, nint.Zero, out nint query) == 0)
+        {
+            try
+            {
+                uint bufferSize = 0;
+                string pathPattern = "\\GPU Adapter Memory(*)\\Dedicated Usage";
+                PdhExpandWildCardPath(nint.Zero, pathPattern, nint.Zero, ref bufferSize, 0);
+
+                if (bufferSize > 0)
+                {
+                    nint buffer = Marshal.AllocHGlobal((int)(bufferSize * 2));
+                    try
+                    {
+                        if (PdhExpandWildCardPath(nint.Zero, pathPattern, buffer, ref bufferSize, 0) == 0)
+                        {
+                            string expanded = Marshal.PtrToStringUni(buffer) ?? string.Empty;
+                            var paths = expanded.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+
+                            foreach (var path in paths)
+                            {
+                                if (PdhAddEnglishCounter(query, path, nint.Zero, out nint counter) == 0)
+                                {
+                                    if (PdhCollectQueryData(query) == 0)
+                                    {
+                                        if (PdhGetFormattedCounterValue(counter, 0x00000200 /* PDH_FMT_DOUBLE */, out _, out var val) == 0)
+                                        {
+                                            if (val.doubleValue > usedBytes)
+                                            {
+                                                usedBytes = val.doubleValue; // 取主独立显卡的 Dedicated Usage
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        Marshal.FreeHGlobal(buffer);
+                    }
+                }
+            }
+            catch { }
+            finally
+            {
+                PdhCloseQuery(query);
+            }
+        }
+
+        return usedBytes / (1024.0 * 1024.0);
+    }
+
     private sealed class ProcessGpuTracker : IDisposable
     {
         private readonly int _pid;
@@ -148,10 +205,7 @@ public static class HardwareMonitor
 
             string pidPattern = $"pid_{_pid}_";
 
-            // 1. 监测 GPU 算力引擎（Compute、3D、Copy 统一累加）
             AddCountersForPattern($"\\GPU Engine({pidPattern}*)\\Utilization Percentage", _engineCounters);
-
-            // 2. 监测专用显存
             AddCountersForPattern($"\\GPU Process Memory({pidPattern}*)\\Dedicated Usage", _vramCounters);
             if (_vramCounters.Count == 0)
             {
@@ -200,7 +254,6 @@ public static class HardwareMonitor
 
             if (_query == nint.Zero) return;
 
-            // 每隔 3 秒自动探测是否有新建的 GPU 计算上下文
             if (_engineCounters.Count == 0 || (DateTime.UtcNow - _lastRefresh).TotalSeconds >= 3)
             {
                 RefreshCounters();
@@ -208,14 +261,12 @@ public static class HardwareMonitor
 
             if (PdhCollectQueryData(_query) != 0) return;
 
-            // 第一次采样只作为基准线，第 2 次开始计算真实的差值百分比
             if (!_hasInitialSample)
             {
                 _hasInitialSample = true;
                 return;
             }
 
-            // 累加该进程所有 GPU 引擎的利用率（Compute / 3D / Copy）
             double engineSum = 0;
             foreach (var counter in _engineCounters)
             {
@@ -226,7 +277,6 @@ public static class HardwareMonitor
             }
             gpuPercent = Math.Clamp(engineSum, 0.0, 100.0);
 
-            // 统计显存占用
             double vramBytes = 0;
             foreach (var counter in _vramCounters)
             {
@@ -251,9 +301,6 @@ public static class HardwareMonitor
         }
     }
 
-    /// <summary>
-    /// 通过 Windows DXGI 原生获取主显卡显存
-    /// </summary>
     private static double QueryTotalVramDxgi()
     {
         try
