@@ -45,6 +45,15 @@ public sealed class MainWindow : Window
     private readonly DispatcherTimer _logFlushTimer;
     private bool _isLogDirty = false;
 
+    private TrayIconManager? _trayIconManager;
+    private bool _isRealExit = false;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool ShowWindow(nint hWnd, int nCmdShow);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(nint hWnd);
+    private const int SW_RESTORE = 9;
+
     /// <summary>
     /// 递归遍历视觉树，获取 TextBox 内部自带的 ScrollViewer
     /// </summary>
@@ -279,9 +288,31 @@ public sealed class MainWindow : Window
         };
         _logFlushTimer.Start();
 
-        // 窗口退出时保存配置并强杀所有后台子进程
+        AppWindow.Closing += (sender, args) =>
+        {
+            if (!_isRealExit)
+            {
+                args.Cancel = true;
+                AppWindow.Hide();
+
+                // 弹出系统托盘通知
+                _trayIconManager?.ShowNotification(
+                    "llama-server 管理器",
+                    "程序已最小化到系统托盘，后台模型服务仍在运行中。\n点击此通知或双击托盘图标可重新打开。"
+                );
+            }
+        };
+
+        // 2. 初始化托盘图标
+        _trayIconManager = new TrayIconManager(_hwnd, "llama-server Multi-Instance Manager");
+        _trayIconManager.RestoreRequested += () => DispatcherQueue.TryEnqueue(BringToFront);
+        _trayIconManager.ExitRequested += () => DispatcherQueue.TryEnqueue(ExitApplication);
+
+        // 3. 真正退出时清理托盘图标
         Closed += (s, e) =>
         {
+            _trayIconManager?.Dispose();
+            _trayIconManager = null;
             _logFlushTimer.Stop();
             SaveConfig();
             foreach (var card in _cardList) card.Stop();
@@ -289,6 +320,25 @@ public sealed class MainWindow : Window
 
         // 初始化读取配置
         LoadConfig();
+    }
+
+    /// <summary>
+    /// 从托盘还原并激活主窗口
+    /// </summary>
+    private void BringToFront()
+    {
+        AppWindow.Show();
+        ShowWindow(_hwnd, SW_RESTORE);
+        SetForegroundWindow(_hwnd);
+    }
+
+    /// <summary>
+    /// 托盘右键菜单真正退出程序
+    /// </summary>
+    private void ExitApplication()
+    {
+        _isRealExit = true;
+        Close();
     }
 
     public static Button CreateIconButton(Symbol symbol, string text, Style? style = null)
