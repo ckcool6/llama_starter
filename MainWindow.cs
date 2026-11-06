@@ -111,8 +111,7 @@ public sealed class MainWindow : Window
         var browseBtn = CreateIconButton(Symbol.OpenFile, "Browse...");
         browseBtn.Click += async (s, e) => await BrowseExeFileAsync();
 
-        var openFolderBtn = CreateIconButton(Symbol.Folder, "Open");
-        openFolderBtn.Click += (s, e) => OpenInExplorer();
+
 
         var addBtn = CreateIconButton(Symbol.Add, "Add Instance");
         addBtn.Click += (s, e) => AddCard();
@@ -177,7 +176,6 @@ public sealed class MainWindow : Window
                 new TextBlock { Text = "Server Path:", VerticalAlignment = VerticalAlignment.Center, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
                 _exePathBox,
                 browseBtn,
-                openFolderBtn,
                 addBtn,
                 startAllBtn,
                 stopAllBtn
@@ -416,23 +414,6 @@ public sealed class MainWindow : Window
         {
             _exePathBox.Text = file.Path;
             AppendSystemLog($"Set Server Path: {file.Path}");
-        }
-    }
-
-    private void OpenInExplorer()
-    {
-        string path = _exePathBox.Text.Trim();
-        if (File.Exists(path))
-        {
-            Process.Start("explorer.exe", $"/select,\"{path}\"");
-        }
-        else if (Directory.Exists(path))
-        {
-            Process.Start("explorer.exe", $"\"{path}\"");
-        }
-        else
-        {
-            AppendSystemLog("[WARN] Path does not exist, cannot open in Explorer.");
         }
     }
 
