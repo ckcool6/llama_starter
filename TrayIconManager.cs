@@ -116,9 +116,22 @@ public sealed class TrayIconManager : IDisposable
         }
     }
 
+    private nint _hLoadedIcon = nint.Zero;
+
     private nint GetAppIcon()
     {
-        // Attempt to extract the icon from the current process executable; fallback to default application icon
+        string iconPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+        if (System.IO.File.Exists(iconPath))
+        {
+            int cx = GetSystemMetrics(49);
+            int cy = GetSystemMetrics(50);
+            _hLoadedIcon = LoadImage(nint.Zero, iconPath, 1, cx, cy, 0x0010);
+            if (_hLoadedIcon != nint.Zero)
+            {
+                return _hLoadedIcon;
+            }
+        }
+
         nint hIcon = ExtractIcon(nint.Zero, Environment.ProcessPath ?? string.Empty, 0);
         if (hIcon == nint.Zero || hIcon == 1)
         {
@@ -163,6 +176,12 @@ public sealed class TrayIconManager : IDisposable
         }
 
         RemoveWindowSubclass(_hwnd, _subclassProc, SubclassId);
+
+        if (_hLoadedIcon != nint.Zero)
+        {
+            DestroyIcon(_hLoadedIcon);
+            _hLoadedIcon = nint.Zero;
+        }
     }
 
     #region P/Invoke
@@ -237,6 +256,15 @@ public sealed class TrayIconManager : IDisposable
 
     [DllImport("comctl32.dll")]
     private static extern nint DefSubclassProc(nint hWnd, uint uMsg, nint wParam, nint lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern nint LoadImage(nint hInst, string lpszName, uint uType, int cxDesired, int cyDesired, uint fuLoad);
+
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int nIndex);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyIcon(nint hIcon);
 
     #endregion
 }

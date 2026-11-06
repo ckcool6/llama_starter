@@ -148,12 +148,30 @@ public sealed class MainWindow : Window
         var stopAllBtn = CreateFontIconButton("\uEE95", "Stop All");
         stopAllBtn.Click += (s, e) => { foreach (var card in _cardList) card.Stop(); };
 
+        var appTitleIcon = new Image
+        {
+            Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(
+                new Uri(Path.Combine(AppContext.BaseDirectory, "Assets", "Square44x44Logo.scale-200.png"))
+            ),
+            Width = 16,
+            Height = 16,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
         var appTitleBlock = new TextBlock
         {
             Text = "llama-server Multi-Instance Manager",
             FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        var titleContentPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            Margin = new Thickness(16, 0, 0, 0),
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(16, 0, 0, 0)
+            Children = { appTitleIcon, appTitleBlock }
         };
 
         var customTitleBar = new Grid
@@ -161,7 +179,7 @@ public sealed class MainWindow : Window
             Height = 36,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
-            Children = { appTitleBlock }
+            Children = { titleContentPanel }
         };
 
         SetTitleBar(customTitleBar);
@@ -599,6 +617,12 @@ public sealed class MainWindow : Window
 
     private void SetupWindowStyle()
     {
+        string iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+        if (File.Exists(iconPath))
+        {
+            AppWindow.SetIcon(iconPath);
+        }
+
         SystemBackdrop = new MicaBackdrop();
         ExtendsContentIntoTitleBar = true;
 
