@@ -149,11 +149,29 @@ public sealed class MainWindow : Window
         var stopAllBtn = CreateFontIconButton("\uEE95", "Stop All");
         stopAllBtn.Click += (s, e) => { foreach (var card in _cardList) card.Stop(); };
 
+        var appTitleBlock = new TextBlock
+        {
+            Text = "llama-server Multi-Instance Manager",
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(16, 0, 0, 0)
+        };
+
+        var customTitleBar = new Grid
+        {
+            Height = 36,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), // 透明背景保证接收拖拽
+            Children = { appTitleBlock }
+        };
+
+        SetTitleBar(customTitleBar);
+
         var topBar = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 10,
-            Margin = new Thickness(24, 48, 24, 16),
+            Margin = new Thickness(24, 8, 24, 16),
             Children =
             {
                 new TextBlock { Text = "Server Path:", VerticalAlignment = VerticalAlignment.Center, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
@@ -280,15 +298,18 @@ public sealed class MainWindow : Window
             RowDefinitions =
             {
                 new RowDefinition { Height = GridLength.Auto },
+                new RowDefinition { Height = GridLength.Auto },
                 new RowDefinition { Height = new GridLength(1, GridUnitType.Star) },
                 new RowDefinition { Height = GridLength.Auto }
             }
         };
 
-        Grid.SetRow(topBar, 0);
-        Grid.SetRow(_cardsScrollViewer, 1);
-        Grid.SetRow(logPanel, 2);
+        Grid.SetRow(customTitleBar, 0);
+        Grid.SetRow(topBar, 1);
+        Grid.SetRow(_cardsScrollViewer, 2);
+        Grid.SetRow(logPanel, 3);
 
+        rootGrid.Children.Add(customTitleBar);
         rootGrid.Children.Add(topBar);
         rootGrid.Children.Add(_cardsScrollViewer);
         rootGrid.Children.Add(logPanel);
