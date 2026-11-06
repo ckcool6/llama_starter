@@ -26,7 +26,9 @@ public class LlamaInstanceCard : UserControl
 
     private Process? _process;
     private readonly Button _startStopBtn;
-    private readonly SymbolIcon _startStopIcon;
+
+    private readonly FontIcon _startStopIcon;
+
     private readonly TextBlock _startStopText;
     private readonly TextBlock _statusBadge;
 
@@ -82,7 +84,12 @@ public class LlamaInstanceCard : UserControl
             FontSize = 12
         };
 
-        _startStopIcon = new SymbolIcon(Symbol.Play);
+        _startStopIcon = new FontIcon
+        {
+            Glyph = "\uE768",
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center
+        };
         _startStopText = new TextBlock { Text = "Start", VerticalAlignment = VerticalAlignment.Center };
 
         _startStopBtn = new Button
@@ -91,7 +98,7 @@ public class LlamaInstanceCard : UserControl
             Content = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
-                Spacing = 6,
+                Spacing = 8,
                 Children = { _startStopIcon, _startStopText }
             }
         };
@@ -413,7 +420,7 @@ public class LlamaInstanceCard : UserControl
             _statusBadge.Text = $"Running (PID: {_process.Id})";
             _statusBadge.Foreground = new SolidColorBrush(Colors.SeaGreen);
 
-            _startStopIcon.Symbol = Symbol.Stop;
+            _startStopIcon.Glyph = "\uEE95";
             _startStopText.Text = "Stop";
             _startStopBtn.ClearValue(Button.StyleProperty);
 
@@ -505,7 +512,7 @@ public class LlamaInstanceCard : UserControl
         _statusBadge.Text = "Stopped";
         _statusBadge.Foreground = new SolidColorBrush(Colors.Gray);
 
-        _startStopIcon.Symbol = Symbol.Play;
+        _startStopIcon.Glyph = "\uE768";
         _startStopText.Text = "Start";
         _startStopBtn.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
     }

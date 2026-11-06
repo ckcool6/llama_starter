@@ -54,6 +54,29 @@ public sealed class MainWindow : Window
     private static extern bool SetForegroundWindow(nint hWnd);
     private const int SW_RESTORE = 9;
 
+    public static Button CreateFontIconButton(string glyph, string text, Style? style = null)
+    {
+        var btn = new Button();
+        if (style != null) btn.Style = style;
+
+        btn.Content = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            Children =
+        {
+            new FontIcon
+            {
+                Glyph = glyph,
+                FontSize = 12,
+                VerticalAlignment = VerticalAlignment.Center
+            },
+            new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center }
+        }
+        };
+        return btn;
+    }
+
     /// <summary>
     /// Recursively traverses the visual tree to find the internal ScrollViewer of a TextBox.
     /// </summary>
@@ -94,7 +117,7 @@ public sealed class MainWindow : Window
         var addBtn = CreateIconButton(Symbol.Add, "Add Instance");
         addBtn.Click += (s, e) => AddCard();
 
-        var startAllBtn = CreateIconButton(Symbol.Play, "Start All", (Style)Application.Current.Resources["AccentButtonStyle"]);
+        var startAllBtn = CreateFontIconButton("\uE768", "Start All", (Style)Application.Current.Resources["AccentButtonStyle"]);
         startAllBtn.Click += async (s, e) =>
         {
             startAllBtn.IsEnabled = false;
@@ -123,7 +146,7 @@ public sealed class MainWindow : Window
             }
         };
 
-        var stopAllBtn = CreateIconButton(Symbol.Stop, "Stop All");
+        var stopAllBtn = CreateFontIconButton("\uEE95", "Stop All");
         stopAllBtn.Click += (s, e) => { foreach (var card in _cardList) card.Stop(); };
 
         var topBar = new StackPanel
