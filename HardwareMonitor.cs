@@ -32,7 +32,7 @@ public static class HardwareMonitor
         double cpuPercent = 0;
         double ramUsedMb = 0;
 
-        // 1. 获取目标进程 CPU 与 RAM
+        // 1. Get target process CPU and RAM usage
         if (process != null && !process.HasExited)
         {
             try
@@ -59,7 +59,7 @@ public static class HardwareMonitor
             catch { }
         }
 
-        // 2. 获取整机物理内存 RAM (全局剩余)
+        // 2. Get total and available system physical memory (RAM)
         double sysRamTotalMb = 0;
         double sysRamFreeMb = 0;
         var memStatus = new MEMORYSTATUSEX { dwLength = (uint)Marshal.SizeOf<MEMORYSTATUSEX>() };
@@ -69,7 +69,7 @@ public static class HardwareMonitor
             sysRamFreeMb = memStatus.ullAvailPhys / (1024.0 * 1024.0);
         }
 
-        // 3. 读取当前 PID 的 GPU 与 显存 VRAM
+        // 3. Read GPU utilization and dedicated VRAM usage for the current PID
         double gpuPercent = 0;
         double vramUsedMb = 0;
 
@@ -90,7 +90,7 @@ public static class HardwareMonitor
             }
         }
 
-        // 清理已结束进程的残留 Tracker
+        // Clean up lingering trackers from terminated processes
         foreach (var pid in _trackers.Keys)
         {
             try
@@ -107,7 +107,7 @@ public static class HardwareMonitor
             }
         }
 
-        // 4. 整机全局总显存与全局剩余显存 (所有卡片统一)
+        // 4. Global total and available system VRAM (unified across all instance cards)
         double sysVramTotalMb = _cachedTotalVramMb;
         double globalUsedVramMb = QueryGlobalUsedVram();
         double sysVramFreeMb = Math.Max(0, sysVramTotalMb - globalUsedVramMb);
@@ -125,7 +125,7 @@ public static class HardwareMonitor
     }
 
     /// <summary>
-    /// 读取 Windows 全局显卡适配器当前被吃掉的总显存（整机所有进程占用总和）
+    /// Reads the total dedicated VRAM consumed across all processes on the primary GPU adapter.
     /// </summary>
     private static double QueryGlobalUsedVram()
     {
@@ -158,7 +158,7 @@ public static class HardwareMonitor
                                         {
                                             if (val.doubleValue > usedBytes)
                                             {
-                                                usedBytes = val.doubleValue; // 取主独立显卡的 Dedicated Usage
+                                                usedBytes = val.doubleValue; // Use maximum dedicated usage found across adapters
                                             }
                                         }
                                     }
@@ -331,7 +331,7 @@ public static class HardwareMonitor
         return 0;
     }
 
-    #region Win32 & DXGI & PDH 导入
+    #region Win32, DXGI & PDH Imports
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MEMORYSTATUSEX

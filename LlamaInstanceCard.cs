@@ -40,7 +40,7 @@ public class LlamaInstanceCard : UserControl
     private readonly TextBox _mmprojBox;
     private readonly TextBox _extraBox;
 
-    // --- 硬件监控相关控件与计时变量 ---
+    // --- Hardware monitoring controls and timing variables ---
     private readonly ProgressBar _cpuBar = new() { Maximum = 100, Height = 6 };
     private readonly TextBlock _cpuText = new() { Text = "0%", FontSize = 11, Width = 45, TextAlignment = TextAlignment.Right };
 
@@ -163,8 +163,7 @@ public class LlamaInstanceCard : UserControl
             ToolTipService.SetToolTip(copyUrlBtn, "Copy API URL (http://127.0.0.1:port)");
         };
 
-
-        // --- 头部操作栏 ---
+        // --- Header action bar ---
         var headerPanel = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -180,37 +179,37 @@ public class LlamaInstanceCard : UserControl
                     VerticalAlignment = VerticalAlignment.Center
                 },
                 _statusBadge,
-                // 操作按钮直接跟在状态标签后，左对齐
+                // Action buttons directly follow the status badge, left-aligned
                 new StackPanel
                 {
                     Orientation = Orientation.Horizontal,
                     Spacing = 8,
                     Margin = new Thickness(16, 0, 0, 0),
-                    Children = { _startStopBtn, viewLogBtn, deleteBtn, copyUrlBtn}
+                    Children = { _startStopBtn, viewLogBtn, deleteBtn, copyUrlBtn }
                 }
             }
         };
 
-        // --- 左侧：参数输入区 ---
+        // --- Left side: Parameter input area ---
         var leftFormPanel = new StackPanel
         {
             Spacing = 12,
             Children =
             {
                 headerPanel,
-                // 使用自适应行的 Grid 替换原本挤在一起的 StackPanel：
+                // Adaptive-row Grid layout filling remaining horizontal space
                 CreateFormRow("-m (Model):", _modelBox, browseModelBtn),
                 new StackPanel
-            {
+                {
                     Orientation = Orientation.Horizontal,
                     Spacing = 12,
                     Children =
-                {
-                    new TextBlock { Text = "Port:", Width = 85, VerticalAlignment = VerticalAlignment.Center }, _portBox,
-                    new TextBlock { Text = "-c:", VerticalAlignment = VerticalAlignment.Center }, _ctxBox,
-                    new TextBlock { Text = "-ngl:", VerticalAlignment = VerticalAlignment.Center }, _nglBox
-                }
-            },
+                    {
+                        new TextBlock { Text = "Port:", Width = 85, VerticalAlignment = VerticalAlignment.Center }, _portBox,
+                        new TextBlock { Text = "-c:", VerticalAlignment = VerticalAlignment.Center }, _ctxBox,
+                        new TextBlock { Text = "-ngl:", VerticalAlignment = VerticalAlignment.Center }, _nglBox
+                    }
+                },
                 CreateFormRow("--mmproj:", _mmprojBox, browseMmprojBtn),
                 CreateFormRow("Extra Args:", _extraBox, editExtraBtn)
             }
@@ -218,7 +217,7 @@ public class LlamaInstanceCard : UserControl
 
         Grid.SetColumn(leftFormPanel, 0);
 
-        // --- 右侧：卡片中的仪表盘子卡片 (Hardware Monitor) ---
+        // --- Right side: Dashboard sub-card inside the card (Hardware Monitor) ---
         var metricsPanel = new Border
         {
             Width = 240,
@@ -245,7 +244,7 @@ public class LlamaInstanceCard : UserControl
         };
         Grid.SetColumn(metricsPanel, 1);
 
-        // 主卡片采用左右两列 Grid 拼接
+        // Main card assembled using a 2-column Grid
         var mainContentGrid = new Grid
         {
             ColumnDefinitions =
@@ -266,7 +265,7 @@ public class LlamaInstanceCard : UserControl
             Child = mainContentGrid
         };
 
-        // 硬件监控定时器（每秒采样一次）
+        // Hardware monitoring timer (samples once per second)
         _metricsTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _metricsTimer.Tick += (s, e) => UpdateMetrics();
     }
@@ -276,11 +275,11 @@ public class LlamaInstanceCard : UserControl
         var grid = new Grid
         {
             ColumnDefinitions =
-        {
-            new ColumnDefinition { Width = new GridLength(85) },                 // 标签固定宽度
-            new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }, // 输入框自动撑满剩余区域
-            new ColumnDefinition { Width = GridLength.Auto }                     // 按钮宽度自适应
-        }
+            {
+                new ColumnDefinition { Width = new GridLength(85) },                 // Fixed label width
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }, // Input auto-fills remaining space
+                new ColumnDefinition { Width = GridLength.Auto }                     // Action button auto-width
+            }
         };
 
         var labelBlock = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center };
@@ -334,25 +333,25 @@ public class LlamaInstanceCard : UserControl
 
         var m = HardwareMonitor.Collect(_process, ref _prevCpuTime, ref _prevSampleTime);
 
-        // 更新 CPU
+        // Update CPU
         _cpuBar.Value = m.CpuPercent;
         _cpuText.Text = $"{m.CpuPercent:F0}%";
 
-        // 更新 RAM (百分比根据整机总内存计算)
+        // Update RAM (percentage calculated against total system memory)
         double ramPercent = m.SystemRamTotalMb > 0 ? (m.RamUsedMb / m.SystemRamTotalMb) * 100 : 0;
         _ramBar.Value = Math.Clamp(ramPercent, 0, 100);
         _ramText.Text = m.RamUsedMb >= 1024 ? $"{m.RamUsedMb / 1024.0:F1} GB" : $"{m.RamUsedMb:F0} MB";
 
-        // 更新 GPU
+        // Update GPU
         _gpuBar.Value = m.GpuPercent;
         _gpuText.Text = $"{m.GpuPercent:F0}%";
 
-        // 更新 VRAM
+        // Update VRAM
         double vramPercent = m.SystemVramTotalMb > 0 ? (m.VramUsedMb / m.SystemVramTotalMb) * 100 : 0;
         _vramBar.Value = Math.Clamp(vramPercent, 0, 100);
         _vramText.Text = m.VramUsedMb >= 1024 ? $"{m.VramUsedMb / 1024.0:F1} GB" : $"{m.VramUsedMb:F0} MB";
 
-        // 底部全局剩余内存与显存展示
+        // Global available RAM and VRAM display at the bottom
         string freeRamStr = m.SystemRamFreeMb >= 1024 ? $"{m.SystemRamFreeMb / 1024.0:F1}G" : $"{m.SystemRamFreeMb:F0}M";
         string freeVramStr = m.SystemVramFreeMb >= 1024 ? $"{m.SystemVramFreeMb / 1024.0:F1}G" : $"{m.SystemVramFreeMb:F0}M";
         _freeMemoryText.Text = $"Free: RAM {freeRamStr} | VRAM {freeVramStr}";
@@ -462,7 +461,7 @@ public class LlamaInstanceCard : UserControl
             _startStopText.Text = "Stop";
             _startStopBtn.ClearValue(Button.StyleProperty);
 
-            // 启动硬件监控定时器
+            // Start hardware monitoring timer
             _metricsTimer.Start();
 
             Log($"[STARTED] Args: {args}");
@@ -626,6 +625,4 @@ public class LlamaInstanceCard : UserControl
         _mmprojBox.Text = config.MmprojPath ?? string.Empty;
         _extraBox.Text = config.ExtraArgs ?? string.Empty;
     }
-
-
 }

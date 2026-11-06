@@ -161,7 +161,7 @@ public sealed class MainWindow : Window
         {
             Height = 36,
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), // 透明背景保证接收拖拽
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
             Children = { appTitleBlock }
         };
 
