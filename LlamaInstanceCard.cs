@@ -10,6 +10,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace llamaStarter;
 
@@ -140,6 +141,25 @@ public class LlamaInstanceCard : UserControl
         ToolTipService.SetToolTip(browseMmprojBtn, "Browse Multimodal Projector (.gguf)");
         browseMmprojBtn.Click += async (s, e) => await PickGgufFileAsync(_mmprojBox);
 
+        var copyUrlBtn = MainWindow.CreateIconButton(Symbol.Copy, "Copy URL");
+        copyUrlBtn.Click += async (s, e) =>
+        {
+            string port = string.IsNullOrWhiteSpace(_portBox.Text) ? "8080" : _portBox.Text.Trim();
+            string url = $"http://127.0.0.1:{port}";
+
+            var package = new DataPackage();
+            package.SetText(url);
+            Clipboard.SetContent(package);
+
+            if (copyUrlBtn.Content is StackPanel sp && sp.Children.Count >= 2 && sp.Children[1] is TextBlock tb)
+            {
+                tb.Text = "Copied!";
+                await Task.Delay(1500);
+                tb.Text = "Copy URL";
+            }
+        };
+
+
         // --- 头部操作栏 ---
         var headerPanel = new StackPanel
         {
@@ -162,7 +182,7 @@ public class LlamaInstanceCard : UserControl
                     Orientation = Orientation.Horizontal,
                     Spacing = 8,
                     Margin = new Thickness(16, 0, 0, 0),
-                    Children = { _startStopBtn, viewLogBtn, deleteBtn }
+                    Children = { _startStopBtn, viewLogBtn, deleteBtn, copyUrlBtn}
                 }
             }
         };
