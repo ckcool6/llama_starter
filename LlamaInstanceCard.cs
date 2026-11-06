@@ -115,16 +115,15 @@ public class LlamaInstanceCard : UserControl
             DeleteRequested?.Invoke(this);
         };
 
-        _modelBox = new TextBox { PlaceholderText = "Model path (.gguf)", Width = 360 };
+        _modelBox = new TextBox { PlaceholderText = "Model path (.gguf)" };
         _portBox = new TextBox { Text = (8080 + id - 1).ToString(), Width = 80 };
         _ctxBox = new TextBox { Text = "4096", Width = 80 };
         _nglBox = new TextBox { Text = "99", Width = 80 };
-        _mmprojBox = new TextBox { PlaceholderText = "Multimodal projector (.gguf, optional)", Width = 360 };
+        _mmprojBox = new TextBox { PlaceholderText = "Multimodal projector (.gguf, optional)" };
 
         _extraBox = new TextBox
         {
             PlaceholderText = "Click to configure extra args (e.g. --host 0.0.0.0)",
-            Width = 360,
             IsReadOnly = true
         };
         _extraBox.Tapped += async (s, e) => await ShowExtraArgsDialogAsync();
@@ -141,7 +140,13 @@ public class LlamaInstanceCard : UserControl
         ToolTipService.SetToolTip(browseMmprojBtn, "Browse Multimodal Projector (.gguf)");
         browseMmprojBtn.Click += async (s, e) => await PickGgufFileAsync(_mmprojBox);
 
-        var copyUrlBtn = MainWindow.CreateIconButton(Symbol.Copy, "Copy URL");
+        var copyUrlBtn = new Button
+        {
+            Content = new SymbolIcon(Symbol.Copy),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        ToolTipService.SetToolTip(copyUrlBtn, "Copy API URL (http://127.0.0.1:port)");
+
         copyUrlBtn.Click += async (s, e) =>
         {
             string port = string.IsNullOrWhiteSpace(_portBox.Text) ? "8080" : _portBox.Text.Trim();
@@ -151,12 +156,11 @@ public class LlamaInstanceCard : UserControl
             package.SetText(url);
             Clipboard.SetContent(package);
 
-            if (copyUrlBtn.Content is StackPanel sp && sp.Children.Count >= 2 && sp.Children[1] is TextBlock tb)
-            {
-                tb.Text = "Copied!";
-                await Task.Delay(1500);
-                tb.Text = "Copy URL";
-            }
+            copyUrlBtn.Content = new SymbolIcon(Symbol.Accept);
+            ToolTipService.SetToolTip(copyUrlBtn, "Copied!");
+            await Task.Delay(1500);
+            copyUrlBtn.Content = new SymbolIcon(Symbol.Copy);
+            ToolTipService.SetToolTip(copyUrlBtn, "Copy API URL (http://127.0.0.1:port)");
         };
 
 
@@ -194,37 +198,24 @@ public class LlamaInstanceCard : UserControl
             Children =
             {
                 headerPanel,
+                // 使用自适应行的 Grid 替换原本挤在一起的 StackPanel：
+                CreateFormRow("-m (Model):", _modelBox, browseModelBtn),
                 new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 10,
-                    Children = { new TextBlock { Text = "-m (Model):", Width = 85, VerticalAlignment = VerticalAlignment.Center }, _modelBox, browseModelBtn }
-                },
-                new StackPanel
-                {
+            {
                     Orientation = Orientation.Horizontal,
                     Spacing = 12,
                     Children =
-                    {
-                        new TextBlock { Text = "Port:", VerticalAlignment = VerticalAlignment.Center }, _portBox,
-                        new TextBlock { Text = "-c:", VerticalAlignment = VerticalAlignment.Center }, _ctxBox,
-                        new TextBlock { Text = "-ngl:", VerticalAlignment = VerticalAlignment.Center }, _nglBox
-                    }
-                },
-                new StackPanel
                 {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 10,
-                    Children = { new TextBlock { Text = "--mmproj:", Width = 85, VerticalAlignment = VerticalAlignment.Center }, _mmprojBox, browseMmprojBtn }
-                },
-                new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 10,
-                    Children = { new TextBlock { Text = "Extra Args:", Width = 85, VerticalAlignment = VerticalAlignment.Center }, _extraBox, editExtraBtn }
+                    new TextBlock { Text = "Port:", Width = 85, VerticalAlignment = VerticalAlignment.Center }, _portBox,
+                    new TextBlock { Text = "-c:", VerticalAlignment = VerticalAlignment.Center }, _ctxBox,
+                    new TextBlock { Text = "-ngl:", VerticalAlignment = VerticalAlignment.Center }, _nglBox
                 }
+            },
+                CreateFormRow("--mmproj:", _mmprojBox, browseMmprojBtn),
+                CreateFormRow("Extra Args:", _extraBox, editExtraBtn)
             }
         };
+
         Grid.SetColumn(leftFormPanel, 0);
 
         // --- 右侧：卡片中的仪表盘子卡片 (Hardware Monitor) ---
@@ -278,6 +269,33 @@ public class LlamaInstanceCard : UserControl
         // 硬件监控定时器（每秒采样一次）
         _metricsTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _metricsTimer.Tick += (s, e) => UpdateMetrics();
+    }
+
+    private static Grid CreateFormRow(string label, FrameworkElement input, FrameworkElement actionBtn)
+    {
+        var grid = new Grid
+        {
+            ColumnDefinitions =
+        {
+            new ColumnDefinition { Width = new GridLength(85) },                 // 标签固定宽度
+            new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }, // 输入框自动撑满剩余区域
+            new ColumnDefinition { Width = GridLength.Auto }                     // 按钮宽度自适应
+        }
+        };
+
+        var labelBlock = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center };
+        input.HorizontalAlignment = HorizontalAlignment.Stretch;
+        input.Margin = new Thickness(0, 0, 8, 0);
+
+        Grid.SetColumn(labelBlock, 0);
+        Grid.SetColumn(input, 1);
+        Grid.SetColumn(actionBtn, 2);
+
+        grid.Children.Add(labelBlock);
+        grid.Children.Add(input);
+        grid.Children.Add(actionBtn);
+
+        return grid;
     }
 
     private static Grid CreateMetricRow(string label, ProgressBar bar, TextBlock valueText)
@@ -608,4 +626,6 @@ public class LlamaInstanceCard : UserControl
         _mmprojBox.Text = config.MmprojPath ?? string.Empty;
         _extraBox.Text = config.ExtraArgs ?? string.Empty;
     }
+
+
 }
